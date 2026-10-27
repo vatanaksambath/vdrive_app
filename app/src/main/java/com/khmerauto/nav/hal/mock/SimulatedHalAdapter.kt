@@ -310,8 +310,12 @@ class SimulatedHalAdapter : VehicleHalContract {
     override suspend fun setTemperature(zone: Zone, tempC: Float): Result<Unit> {
         val clamped = tempC.coerceIn(16.0f, 30.0f)
         _telemetryState.update {
-            val h = if (zone == Zone.PASSENGER) it.hvacState.copy(passengerTempC = clamped)
-            else it.hvacState.copy(driverTempC = clamped)
+            val syncActive = it.hvacState.isSyncOn
+            val h = when {
+                zone == Zone.DRIVER && syncActive -> it.hvacState.copy(driverTempC = clamped, passengerTempC = clamped)
+                zone == Zone.PASSENGER -> it.hvacState.copy(passengerTempC = clamped, isSyncOn = false)
+                else -> it.hvacState.copy(driverTempC = clamped)
+            }
             it.copy(hvacState = h)
         }
         val area = if (zone == Zone.PASSENGER) 4 else 1
@@ -332,21 +336,52 @@ class SimulatedHalAdapter : VehicleHalContract {
         maxAc: Boolean?,
         recirc: Boolean?,
         frontDefrost: Boolean?,
-        rearDefrost: Boolean?
+        rearDefrost: Boolean?,
+        sync: Boolean?,
+        cleanAir: Boolean?
     ): Result<Unit> {
         _telemetryState.update { s ->
+            val isMax = maxAc ?: s.hvacState.isMaxAcOn
+            val isAuto = auto ?: s.hvacState.isAutoOn
+            val isSync = sync ?: s.hvacState.isSyncOn
+
+            var newDriverTemp = s.hvacState.driverTempC
+            var newPassengerTemp = s.hvacState.passengerTempC
+            var newFanSpeed = s.hvacState.fanSpeed
+            var newAc = ac ?: s.hvacState.isAcOn
+            var newRecirc = recirc ?: s.hvacState.isRecircOn
+
+            if (maxAc == true) {
+                newAc = true
+                newRecirc = true
+                newFanSpeed = 7
+                newDriverTemp = 18.0f
+                if (isSync) newPassengerTemp = 18.0f
+            }
+
             s.copy(
                 hvacState = s.hvacState.copy(
-                    isAcOn = ac ?: s.hvacState.isAcOn,
-                    isAutoOn = auto ?: s.hvacState.isAutoOn,
-                    isMaxAcOn = maxAc ?: s.hvacState.isMaxAcOn,
-                    isRecircOn = recirc ?: s.hvacState.isRecircOn,
+                    isAcOn = newAc,
+                    isAutoOn = isAuto,
+                    isMaxAcOn = isMax,
+                    isRecircOn = newRecirc,
                     isFrontDefrostOn = frontDefrost ?: s.hvacState.isFrontDefrostOn,
-                    isRearDefrostOn = rearDefrost ?: s.hvacState.isRearDefrostOn
+                    isRearDefrostOn = rearDefrost ?: s.hvacState.isRearDefrostOn,
+                    isSyncOn = isSync,
+                    isCleanAirOn = cleanAir ?: s.hvacState.isCleanAirOn,
+                    driverTempC = newDriverTemp,
+                    passengerTempC = if (isSync) newDriverTemp else newPassengerTemp,
+                    fanSpeed = newFanSpeed
                 )
             )
         }
         ac?.let { snifferEventListener?.invoke(0x15200505, 1, it, "SIMULATOR_AC") }
+        return Result.success(Unit)
+    }
+
+    override suspend fun setDriveMode(mode: GeelyDriveMode): Result<Unit> {
+        _telemetryState.update { it.copy(driveMode = mode) }
+        snifferEventListener?.invoke(0x11400200, 0, mode.name, "SIMULATOR_DRIVE_MODE")
         return Result.success(Unit)
     }
 

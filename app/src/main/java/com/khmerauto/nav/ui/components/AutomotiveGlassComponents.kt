@@ -243,7 +243,7 @@ fun EzFanSpeedTicks(
 ) {
     Row(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         for (i in 1..7) {
@@ -251,8 +251,8 @@ fun EzFanSpeedTicks(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(28.dp)
-                    .clip(RoundedCornerShape(4.dp))
+                    .height(16.dp)
+                    .clip(RoundedCornerShape(3.dp))
                     .background(
                         if (isActive) {
                             Brush.verticalGradient(
@@ -267,7 +267,7 @@ fun EzFanSpeedTicks(
                     .border(
                         0.5.dp,
                         if (isActive) EzAccentCyan.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.05f),
-                        RoundedCornerShape(4.dp)
+                        RoundedCornerShape(3.dp)
                     )
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -298,14 +298,14 @@ fun EzDualTempSelector(
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         // L / R Zone Pills
         Row(
             modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(6.dp))
                 .background(Color(0xFF1A1730))
-                .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(8.dp))
+                .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(6.dp))
                 .padding(2.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
@@ -316,17 +316,17 @@ fun EzDualTempSelector(
         // Decrement button
         Box(
             modifier = Modifier
-                .size(32.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .size(26.dp)
+                .clip(RoundedCornerShape(6.dp))
                 .background(Color(0xFF1E1B35))
-                .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(8.dp))
+                .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(6.dp))
                 .clickable {
                     val next = (currentTemp - 0.5f).coerceIn(16.0f, 30.0f)
                     onTempSelected(activeZone, next)
                 },
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.KeyboardArrowLeft, contentDescription = null, tint = EzTxtPrimary, modifier = Modifier.size(18.dp))
+            Icon(Icons.Default.KeyboardArrowLeft, contentDescription = null, tint = EzTxtPrimary, modifier = Modifier.size(16.dp))
         }
 
         // Stepped temperature pills
@@ -344,17 +344,17 @@ fun EzDualTempSelector(
                     val isCenter = offset == 0.0f
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(6.dp))
                             .background(
                                 if (isCenter) Color.White else Color.Transparent
                             )
                             .clickable { onTempSelected(activeZone, tempVal) }
-                            .padding(horizontal = if (isCenter) 10.dp else 6.dp, vertical = 4.dp),
+                            .padding(horizontal = if (isCenter) 7.dp else 4.dp, vertical = 2.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = if (isCenter) String.format("%.1f°C", tempVal) else String.format("%.1f", tempVal),
-                            fontSize = if (isCenter) 14.sp else 11.sp,
+                            fontSize = if (isCenter) 13.sp else 10.sp,
                             fontWeight = if (isCenter) FontWeight.Black else FontWeight.Normal,
                             fontFamily = FontFamily.Monospace,
                             color = if (isCenter) Color(0xFF0D0B1A) else EzTxtSecondary
@@ -367,17 +367,17 @@ fun EzDualTempSelector(
         // Increment button
         Box(
             modifier = Modifier
-                .size(32.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .size(26.dp)
+                .clip(RoundedCornerShape(6.dp))
                 .background(Color(0xFF1E1B35))
-                .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(8.dp))
+                .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(6.dp))
                 .clickable {
                     val next = (currentTemp + 0.5f).coerceIn(16.0f, 30.0f)
                     onTempSelected(activeZone, next)
                 },
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = EzTxtPrimary, modifier = Modifier.size(18.dp))
+            Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = EzTxtPrimary, modifier = Modifier.size(16.dp))
         }
     }
 }
@@ -386,15 +386,15 @@ fun EzDualTempSelector(
 private fun ZonePill(label: String, isSelected: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(28.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .size(22.dp)
+            .clip(RoundedCornerShape(4.dp))
             .background(if (isSelected) Color.White else Color.Transparent)
             .clickable(remember { MutableInteractionSource() }, null) { onClick() },
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
-            fontSize = 12.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             color = if (isSelected) Color(0xFF0D0B1A) else EzTxtSecondary
         )
@@ -418,13 +418,13 @@ fun EzCarTopTpms(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         // Left Column (FL & RL)
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TpmsPill(label = "FL", bar = flBar)
             TpmsPill(label = "RL", bar = rlBar)
         }
 
         // Center Wireframe Car Icon
-        Canvas(modifier = Modifier.size(width = 36.dp, height = 62.dp)) {
+        Canvas(modifier = Modifier.size(width = 30.dp, height = 50.dp)) {
             val cw = size.width
             val ch = size.height
 
@@ -459,7 +459,7 @@ fun EzCarTopTpms(
         }
 
         // Right Column (FR & RR)
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TpmsPill(label = "FR", bar = frBar)
             TpmsPill(label = "RR", bar = rrBar)
         }

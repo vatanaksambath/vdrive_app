@@ -86,6 +86,8 @@ class MainActivity : ComponentActivity() {
                                     )
                                     "cockpit" -> CockpitScreen(
                                         currentHal = app.currentHal,
+                                        placeRepository = app.placeRepository,
+                                        routeEngine = app.routeEngine,
                                         gapSummary = gapSummary,
                                         voiceService = app.voiceService,
                                         navController = app.navigationController,

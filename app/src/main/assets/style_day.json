@@ -20,7 +20,7 @@
       "id": "background",
       "type": "background",
       "paint": {
-        "background-color": "#EFF3F8"
+        "background-color": "#FFFFFF"
       }
     },
     {
@@ -30,9 +30,9 @@
       "minzoom": 0,
       "maxzoom": 19,
       "paint": {
-        "raster-opacity": 0.9,
-        "raster-saturation": -0.1,
-        "raster-contrast": 0.05
+        "raster-opacity": 1.0,
+        "raster-saturation": 0.15,
+        "raster-contrast": 0.08
       }
     }
   ]

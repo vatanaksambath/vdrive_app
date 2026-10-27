@@ -206,8 +206,15 @@ class CarHalWebSocketServer(
                     maxAc = cmd.maxAc,
                     recirc = cmd.recirc,
                     frontDefrost = cmd.frontDefrost,
-                    rearDefrost = cmd.rearDefrost
+                    rearDefrost = cmd.rearDefrost,
+                    sync = cmd.sync,
+                    cleanAir = cmd.cleanAir
                 )
+                "SET_DRIVE_MODE" -> {
+                    val m = cmd.driveMode?.let { runCatching { com.khmerauto.nav.hal.GeelyDriveMode.valueOf(it) }.getOrNull() }
+                        ?: com.khmerauto.nav.hal.GeelyDriveMode.SMART
+                    vehicleHal.setDriveMode(m)
+                }
                 "SET_WINDOW_POS" -> vehicleHal.setWindowPosition(cmd.window ?: WindowTarget.FRONT_LEFT, cmd.openPercent ?: 0)
                 "SET_SUNROOF_SHADE" -> vehicleHal.setSunroofAndShade(cmd.sunroofPercent, cmd.shadePercent)
                 "SET_DOOR_LOCKS" -> vehicleHal.setDoorLocks(cmd.stateBool ?: true)

@@ -37,7 +37,7 @@ interface VehicleHalContract {
 
     /**
      * HVAC operational modes: A/C compressor, Auto mode, Max A/C, Recirculation,
-     * Front windshield defrost, and Rear window / mirror defogger.
+     * Front windshield defrost, Rear window / mirror defogger, Dual-Zone Sync, and CleanZone Ion Purifier.
      */
     suspend fun setAcMode(
         ac: Boolean? = null,
@@ -45,8 +45,16 @@ interface VehicleHalContract {
         maxAc: Boolean? = null,
         recirc: Boolean? = null,
         frontDefrost: Boolean? = null,
-        rearDefrost: Boolean? = null
+        rearDefrost: Boolean? = null,
+        sync: Boolean? = null,
+        cleanAir: Boolean? = null
     ): Result<Unit>
+
+    /**
+     * Official 2026 Geely Galaxy M7 (Thor EM-P) Drive Modes:
+     * PURE_EV (纯电), SMART (智能), POWER (性能), RANGE_EXT (增程 / 保电).
+     */
+    suspend fun setDriveMode(mode: GeelyDriveMode): Result<Unit> = Result.success(Unit)
 
     /**
      * Electric window position: 0% = fully closed, 100% = fully open.
@@ -126,6 +134,7 @@ data class VehicleTelemetryState(
     val odometerKm: Float = 14285.4f,
     val speedKmh: Float = 0.0f,
     val gear: GearState = GearState.P,
+    val driveMode: GeelyDriveMode = GeelyDriveMode.SMART,
     val isCharging: Boolean = false,
     val chargePowerKw: Float = 0.0f,
     val latitude: Double = 11.5564,
@@ -136,6 +145,14 @@ data class VehicleTelemetryState(
     val tpmsState: TpmsState = TpmsState(),
     val timestampMs: Long = System.currentTimeMillis()
 )
+
+@Serializable
+enum class GeelyDriveMode {
+    PURE_EV,    // 纯电 - 100% Electric
+    SMART,      // 智能 - Thor EM-P AI Intelligent Hybrid
+    POWER,      // 性能 - High Output Performance AWD
+    RANGE_EXT   // 增程 - Energy Preservation / Range Extender
+}
 
 @Serializable
 enum class GearState {
@@ -161,14 +178,16 @@ enum class SeatTarget {
 data class HvacState(
     val isPowerOn: Boolean = true,
     val driverTempC: Float = 22.0f,
-    val passengerTempC: Float = 22.5f,
+    val passengerTempC: Float = 22.0f,
     val fanSpeed: Int = 3, // 1 to 7
     val isAcOn: Boolean = true,
     val isAutoOn: Boolean = true,
     val isMaxAcOn: Boolean = false,
     val isRecircOn: Boolean = true,
     val isFrontDefrostOn: Boolean = false,
-    val isRearDefrostOn: Boolean = false
+    val isRearDefrostOn: Boolean = false,
+    val isSyncOn: Boolean = true,
+    val isCleanAirOn: Boolean = true
 )
 
 @Serializable

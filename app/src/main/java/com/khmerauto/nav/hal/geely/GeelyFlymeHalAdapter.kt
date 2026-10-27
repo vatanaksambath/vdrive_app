@@ -187,7 +187,9 @@ class GeelyFlymeHalAdapter(
         maxAc: Boolean?,
         recirc: Boolean?,
         frontDefrost: Boolean?,
-        rearDefrost: Boolean?
+        rearDefrost: Boolean?,
+        sync: Boolean?,
+        cleanAir: Boolean?
     ): Result<Unit> = rateLimiter.executeWithRateLimit("AC_MODE") {
         withContext(Dispatchers.IO) {
             try {
@@ -217,10 +219,30 @@ class GeelyFlymeHalAdapter(
                 rearDefrost?.let {
                     _telemetryState.update { s -> s.copy(hvacState = s.hvacState.copy(isRearDefrostOn = it)) }
                 }
+                sync?.let {
+                    _telemetryState.update { s -> s.copy(hvacState = s.hvacState.copy(isSyncOn = it)) }
+                }
+                cleanAir?.let {
+                    _telemetryState.update { s -> s.copy(hvacState = s.hvacState.copy(isCleanAirOn = it)) }
+                }
                 Result.success(Unit)
             } catch (e: Exception) {
                 Result.failure(e)
             }
+        }
+    }
+
+    override suspend fun setDriveMode(mode: GeelyDriveMode): Result<Unit> = rateLimiter.executeWithRateLimit("DRIVE_MODE") {
+        withContext(Dispatchers.IO) {
+            val modeVal = when (mode) {
+                GeelyDriveMode.PURE_EV -> 0
+                GeelyDriveMode.SMART -> 1
+                GeelyDriveMode.POWER -> 2
+                GeelyDriveMode.RANGE_EXT -> 3
+            }
+            executeTierChain("DRIVE_MODE", 0x1020, 0, 0x11400200, 0, modeVal)
+            _telemetryState.update { it.copy(driveMode = mode) }
+            Result.success(Unit)
         }
     }
 

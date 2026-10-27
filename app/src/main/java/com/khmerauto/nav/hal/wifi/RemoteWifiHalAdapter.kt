@@ -210,7 +210,9 @@ class RemoteWifiHalAdapter(
         maxAc: Boolean?,
         recirc: Boolean?,
         frontDefrost: Boolean?,
-        rearDefrost: Boolean?
+        rearDefrost: Boolean?,
+        sync: Boolean?,
+        cleanAir: Boolean?
     ): Result<Unit> {
         return sendCommand(
             HalCommandPacket(
@@ -220,9 +222,15 @@ class RemoteWifiHalAdapter(
                 maxAc = maxAc,
                 recirc = recirc,
                 frontDefrost = frontDefrost,
-                rearDefrost = rearDefrost
+                rearDefrost = rearDefrost,
+                sync = sync,
+                cleanAir = cleanAir
             )
         )
+    }
+
+    override suspend fun setDriveMode(mode: com.khmerauto.nav.hal.GeelyDriveMode): Result<Unit> {
+        return sendCommand(HalCommandPacket(commandType = "SET_DRIVE_MODE", driveMode = mode.name))
     }
 
     override suspend fun setWindowPosition(window: WindowTarget, openPercent: Int): Result<Unit> {

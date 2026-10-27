@@ -486,6 +486,57 @@ class OfflinePlaceSearchRepository(
                     addressKm = "កោះពេជ្រ, ខណ្ឌចំការមន, ភ្នំពេញ",
                     addressEn = "Diamond Island, Phnom Penh",
                     city = "Phnom Penh"
+                ),
+                // 5. Driver Shortcuts matching Geely Cockpit Screenshot
+                PlaceEntity(
+                    nameKm = "ផ្ទះ",
+                    nameEn = "Home",
+                    category = PlaceCategory.SAVED_HOME,
+                    latitude = 11.5580,
+                    longitude = 104.9200,
+                    addressKm = "បឹងកេងកង ១, ខណ្ឌបឹងកេងកង, ភ្នំពេញ",
+                    addressEn = "BKK1, Phnom Penh",
+                    city = "Phnom Penh"
+                ),
+                PlaceEntity(
+                    nameKm = "កន្លែងធ្វើការ",
+                    nameEn = "Work",
+                    category = PlaceCategory.SAVED_WORK,
+                    latitude = 11.5724,
+                    longitude = 104.9196,
+                    addressKm = "អគារកាណាឌីយ៉ា, មហាវិថីព្រះមុនីវង្ស, ភ្នំពេញ",
+                    addressEn = "Canadia Tower, Monivong Blvd, Phnom Penh",
+                    city = "Phnom Penh"
+                ),
+                PlaceEntity(
+                    nameKm = "bong ka",
+                    nameEn = "bong ka",
+                    category = PlaceCategory.FAVORITE,
+                    latitude = 11.5510,
+                    longitude = 104.9270,
+                    addressKm = "ផ្លូវលេខ ៣០២, បឹងកេងកង, ភ្នំពេញ",
+                    addressEn = "Street 302, BKK, Phnom Penh",
+                    city = "Phnom Penh"
+                ),
+                PlaceEntity(
+                    nameKm = "ម៉ឺងយ៉ា",
+                    nameEn = "Meung Ya",
+                    category = PlaceCategory.FAVORITE,
+                    latitude = 11.5760,
+                    longitude = 104.8980,
+                    addressKm = "ទួលគោក, ភ្នំពេញ",
+                    addressEn = "Toul Kork, Phnom Penh",
+                    city = "Phnom Penh"
+                ),
+                PlaceEntity(
+                    nameKm = "KEL",
+                    nameEn = "KEL",
+                    category = PlaceCategory.FAVORITE,
+                    latitude = 11.5490,
+                    longitude = 104.9320,
+                    addressKm = "ផ្លូវបាសាក់, ភ្នំពេញ",
+                    addressEn = "Bassac Lane, Phnom Penh",
+                    city = "Phnom Penh"
                 )
             )
         }

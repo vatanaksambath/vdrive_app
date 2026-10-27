@@ -3,15 +3,22 @@ package com.khmerauto.nav.ui.cockpit
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,13 +29,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.khmerauto.nav.R
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -36,19 +48,27 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.khmerauto.nav.core.calendar.ChankitekCalendar
 import com.khmerauto.nav.core.calendar.SolarCalculator
 import com.khmerauto.nav.core.calendar.ThemeMode
+import com.khmerauto.nav.core.database.entity.PlaceCategory
+import com.khmerauto.nav.core.database.entity.PlaceEntity
 import com.khmerauto.nav.core.i18n.AppLanguage
 import com.khmerauto.nav.core.i18n.LanguageManager
 import com.khmerauto.nav.core.i18n.LocalAppStrings
 import com.khmerauto.nav.hal.*
 import com.khmerauto.nav.map.CambodiaOfflineMapView
+import com.khmerauto.nav.map.routing.ActiveNavigationState
+import com.khmerauto.nav.map.routing.ManeuverType
+import com.khmerauto.nav.map.routing.NavigationRouteEngine
+import com.khmerauto.nav.map.search.OfflinePlaceSearchRepository
 import com.khmerauto.nav.telemetry.GapReconciliationEngine
 import com.khmerauto.nav.telemetry.GapReconciliationSummary
 import com.khmerauto.nav.ui.components.*
 import com.khmerauto.nav.voice.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalTime
@@ -81,6 +101,8 @@ fun Modifier.ezGlow(color: Color, radius: Dp = 8.dp): Modifier = drawBehind {
 @Composable
 fun CockpitScreen(
     currentHal: VehicleHalContract,
+    placeRepository: OfflinePlaceSearchRepository? = null,
+    routeEngine: NavigationRouteEngine? = null,
     gapSummary: GapReconciliationSummary? = null,
     voiceService: VoiceAssistantService? = null,
     navController: NavigationController? = null,
@@ -101,224 +123,656 @@ fun CockpitScreen(
     val currentLang     by LanguageManager.currentLanguage.collectAsState()
     val themeMode       by SolarCalculator.themeMode.collectAsState()
 
+    // Navigation and Places reactive states
+    val navState by (routeEngine?.navState ?: remember { MutableStateFlow(ActiveNavigationState()) }).collectAsState()
+    var allPlaces by remember { mutableStateOf<List<PlaceEntity>>(emptyList()) }
+    var selectedPlace by remember { mutableStateOf<PlaceEntity?>(null) }
+    var recenterTrigger by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(placeRepository) {
+        if (placeRepository != null) {
+            allPlaces = placeRepository.getAllPlaces()
+        }
+    }
+
     // Active overlay modal state (NONE, CABIN, VOICE, SPENDING)
     var activeOverlay by remember { mutableStateOf(initialOverlay) }
 
-    // Clock
-    var clock by remember { mutableStateOf(LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))) }
-    LaunchedEffect(Unit) {
-        while (true) { delay(30_000); clock = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")) }
+    // Dynamic Splitter & Fullscreen Map State
+    // User can dynamically drag the divider to make either panel larger or smaller (0.20f to 0.80f)
+    var splitRatio by remember { mutableFloatStateOf(0.48f) }
+    var isDraggingSplitter by remember { mutableStateOf(false) }
+    var isFullMap by remember { mutableStateOf(false) }
+
+    val animatedSplitRatio by animateFloatAsState(
+        targetValue = if (isFullMap) 0f else splitRatio,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "splitRatioAnim"
+    )
+    val effectiveSplitRatio = if (isDraggingSplitter) splitRatio else animatedSplitRatio
+
+    BoxWithConstraints(modifier = modifier.fillMaxSize().background(EzBgDeep)) {
+        val totalWidth = maxWidth
+        val density = LocalDensity.current
+        val totalWidthPx = with(density) { totalWidth.toPx() }
+
+        Column(modifier = Modifier.fillMaxSize()) {
+
+            // ── Top Navigation Strip (Tabs + Lang + Theme + Diagnostics) ────
+            AnimatedVisibility(
+                visible  = !isFullMap,
+                enter    = slideInVertically(tween(300)) { -it } + fadeIn(tween(300)),
+                exit     = slideOutVertically(tween(250)) { -it } + fadeOut(tween(250))
+            ) {
+                EzTopStrip(
+                    currentLang      = currentLang,
+                    themeMode        = themeMode,
+                    leftPanelVisible = effectiveSplitRatio > 0.05f,
+                    activeOverlay    = activeOverlay,
+                    onSelectOverlay  = { overlay ->
+                        activeOverlay = if (activeOverlay == overlay) CockpitOverlay.NONE else overlay
+                    },
+                    onToggleLeft     = {
+                        splitRatio = if (splitRatio > 0.15f) 0f else 0.48f
+                    },
+                    onLanguageToggle = { LanguageManager.toggleLanguage() },
+                    onThemeToggle    = {
+                        SolarCalculator.setThemeMode(
+                            when (themeMode) {
+                                ThemeMode.AUTO  -> ThemeMode.DAY
+                                ThemeMode.DAY   -> ThemeMode.NIGHT
+                                ThemeMode.NIGHT -> ThemeMode.AUTO
+                            }
+                        )
+                    }
+                )
+            }
+
+            // ── Dynamic Draggable Two-Panel Workspace ─────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(
+                        start = if (isFullMap) 0.dp else 10.dp,
+                        end = if (isFullMap) 0.dp else 10.dp,
+                        bottom = if (isFullMap) 0.dp else 8.dp,
+                        top = if (isFullMap) 0.dp else 2.dp
+                    )
+            ) {
+                // 1. LEFT PANEL: Cabin Suite / Telemetry Overview (Dynamically resizable)
+                if (effectiveSplitRatio > 0.05f) {
+                    val leftWidth = (totalWidth - 16.dp) * effectiveSplitRatio
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(leftWidth)
+                    ) {
+                        when (activeOverlay) {
+                            CockpitOverlay.VOICE -> {
+                                EzVoiceModal(
+                                    currentHal    = currentHal,
+                                    voiceService  = voiceService,
+                                    navController = navController,
+                                    onClose       = { activeOverlay = CockpitOverlay.NONE }
+                                )
+                            }
+                            CockpitOverlay.SPENDING -> {
+                                EzSpendingModal(
+                                    currentHal = currentHal,
+                                    gapEngine  = gapEngine,
+                                    gapSummary = gapSummary,
+                                    onClose    = { activeOverlay = CockpitOverlay.NONE }
+                                )
+                            }
+                            else -> {
+                                EzCabinSuite(
+                                    currentHal = currentHal,
+                                    telemetry  = telemetry,
+                                    strings    = strings,
+                                    onClose    = { /* Stay in cockpit view */ },
+                                    modifier   = Modifier.fillMaxSize()
+                                )
+                            }
+                        }
+                    }
+
+                    // 2. DRAGGABLE SPLITTER HANDLE (Between panels: drag left/right, double-tap to reset)
+                    if (!isFullMap) {
+                        EzSplitterDivider(
+                            isDragging   = isDraggingSplitter,
+                            splitRatio   = splitRatio,
+                            onDrag       = { deltaPx ->
+                                val deltaRatio = deltaPx / totalWidthPx
+                                splitRatio = (splitRatio + deltaRatio).coerceIn(0.20f, 0.80f)
+                            },
+                            onDragStart  = { isDraggingSplitter = true },
+                            onDragEnd    = { isDraggingSplitter = false },
+                            onDoubleTap  = { splitRatio = 0.50f }
+                        )
+                    }
+                }
+
+                // 3. RIGHT PANEL: Framed Offline Cambodia Map & Navigation Card
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .weight(1f)
+                ) {
+                    EzMapPanelCard(
+                        telemetry               = telemetry,
+                        places                  = allPlaces,
+                        navState                = navState,
+                        selectedPlace           = selectedPlace,
+                        recenterTrigger         = recenterTrigger,
+                        isFullMap               = isFullMap,
+                        onToggleFullMap         = { isFullMap = !isFullMap },
+                        onPlaceSelected         = { place ->
+                            selectedPlace = place
+                            coroutineScope.launch {
+                                routeEngine?.startNavigation(
+                                    destination           = place,
+                                    currentBatteryPercent = telemetry.batteryPercent,
+                                    startLat              = telemetry.latitude,
+                                    startLng              = telemetry.longitude
+                                )
+                                navController?.navigateTo(place)
+                            }
+                        },
+                        onQuickDestinationClick = { place ->
+                            selectedPlace = place
+                            coroutineScope.launch {
+                                routeEngine?.startNavigation(
+                                    destination           = place,
+                                    currentBatteryPercent = telemetry.batteryPercent,
+                                    startLat              = telemetry.latitude,
+                                    startLng              = telemetry.longitude
+                                )
+                                navController?.navigateTo(place)
+                            }
+                        },
+                        onOpenVoice             = { activeOverlay = CockpitOverlay.VOICE },
+                        onRecenter              = { recenterTrigger++ },
+                        onZoomIn                = { navController?.zoomIn() },
+                        onZoomOut               = { navController?.zoomOut() },
+                        onStopNavigation        = {
+                            routeEngine?.stopNavigation()
+                            navController?.stopNavigation()
+                            selectedPlace = null
+                        },
+                        onSearchQuery           = { query ->
+                            placeRepository?.searchPlaces(query) ?: emptyList()
+                        },
+                        modifier                = Modifier.fillMaxSize()
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Draggable Splitter Divider between Left & Right Cockpit Panels
+// ═══════════════════════════════════════════════════════════════════════════
+@Composable
+fun EzSplitterDivider(
+    isDragging: Boolean,
+    splitRatio: Float,
+    onDrag: (Float) -> Unit,
+    onDragStart: () -> Unit,
+    onDragEnd: () -> Unit,
+    onDoubleTap: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(16.dp)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onDoubleTap = { onDoubleTap() }
+                )
+            }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { onDragStart() },
+                    onDragEnd = { onDragEnd() },
+                    onDragCancel = { onDragEnd() }
+                ) { change, dragAmount ->
+                    change.consume()
+                    onDrag(dragAmount)
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        // Vertical divider guide line
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(1.dp)
+                .background(if (isDragging) EzAccentCyan.copy(0.5f) else EzBorderSubtle)
+        )
+
+        // Center Grip Handle Capsule
+        Box(
+            modifier = Modifier
+                .width(if (isDragging) 6.dp else 4.dp)
+                .height(64.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(if (isDragging) EzAccentCyan else Color(0xFF33304E))
+                .border(
+                    0.5.dp,
+                    if (isDragging) EzAccentCyan else EzBorderSubtle,
+                    RoundedCornerShape(3.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                repeat(3) {
+                    Box(
+                        modifier = Modifier
+                            .size(2.dp)
+                            .clip(CircleShape)
+                            .background(if (isDragging) Color(0xFF0D0B1A) else EzTxtMuted)
+                    )
+                }
+            }
+        }
+
+        // Dynamic Percentage Badge during active dragging
+        if (isDragging) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xF0121024),
+                border = BorderStroke(1.dp, EzAccentCyan),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = 20.dp)
+                    .zIndex(10f)
+            ) {
+                Text(
+                    text = "${(splitRatio * 100).toInt()}%  |  ${((1f - splitRatio) * 100).toInt()}%",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = EzAccentCyan,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Framed Offline Map Panel Card with Search, Quick Chips & Navigation Banner
+// ═══════════════════════════════════════════════════════════════════════════
+@Composable
+fun EzMapPanelCard(
+    telemetry: VehicleTelemetryState,
+    places: List<PlaceEntity>,
+    navState: ActiveNavigationState,
+    selectedPlace: PlaceEntity?,
+    recenterTrigger: Int,
+    isFullMap: Boolean,
+    onToggleFullMap: () -> Unit,
+    onPlaceSelected: (PlaceEntity) -> Unit,
+    onQuickDestinationClick: (PlaceEntity) -> Unit,
+    onOpenVoice: () -> Unit,
+    onRecenter: () -> Unit,
+    onZoomIn: () -> Unit,
+    onZoomOut: () -> Unit,
+    onStopNavigation: () -> Unit,
+    onSearchQuery: suspend (String) -> List<PlaceEntity>,
+    modifier: Modifier = Modifier
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var searchResults by remember { mutableStateOf<List<PlaceEntity>>(emptyList()) }
+    var isSearchActive by remember { mutableStateOf(false) }
+
+    LaunchedEffect(searchQuery) {
+        if (searchQuery.isNotBlank()) {
+            searchResults = onSearchQuery(searchQuery)
+        } else {
+            searchResults = emptyList()
+        }
     }
 
-    val today     = remember { LocalDate.now() }
-    val chankitek = remember(today) { ChankitekCalendar.calculate(today) }
+    // 5 Geely Cockpit Shortcuts (matching photo: 🏠 ផ្ទះ, 💼 កន្លែងធ្វើការ, bong ka, ម៉ឺងយ៉ា, KEL)
+    val homePlace = remember(places) {
+        places.firstOrNull { it.category == PlaceCategory.SAVED_HOME || it.nameKm.contains("ផ្ទះ") }
+            ?: PlaceEntity(nameKm = "ផ្ទះ", nameEn = "Home", category = PlaceCategory.SAVED_HOME, latitude = 11.5580, longitude = 104.9200, addressKm = "បឹងកេងកង ១", addressEn = "BKK1")
+    }
+    val workPlace = remember(places) {
+        places.firstOrNull { it.category == PlaceCategory.SAVED_WORK || it.nameKm.contains("ការងារ") }
+            ?: PlaceEntity(nameKm = "កន្លែងធ្វើការ", nameEn = "Work", category = PlaceCategory.SAVED_WORK, latitude = 11.5724, longitude = 104.9196, addressKm = "អគារកាណាឌីយ៉ា", addressEn = "Canadia Tower")
+    }
+    val bongKaPlace = remember(places) {
+        places.firstOrNull { it.nameEn.contains("bong ka", ignoreCase = true) }
+            ?: PlaceEntity(nameKm = "bong ka", nameEn = "bong ka", category = PlaceCategory.FAVORITE, latitude = 11.5510, longitude = 104.9270, addressKm = "បឹងកេងកង", addressEn = "BKK")
+    }
+    val meungYaPlace = remember(places) {
+        places.firstOrNull { it.nameKm.contains("ម៉ឺងយ៉ា") || it.nameEn.contains("Meung Ya", ignoreCase = true) }
+            ?: PlaceEntity(nameKm = "ម៉ឺងយ៉ា", nameEn = "Meung Ya", category = PlaceCategory.FAVORITE, latitude = 11.5760, longitude = 104.8980, addressKm = "ទួលគោក", addressEn = "Toul Kork")
+    }
+    val kelPlace = remember(places) {
+        places.firstOrNull { it.nameEn.contains("KEL", ignoreCase = true) }
+            ?: PlaceEntity(nameKm = "KEL", nameEn = "KEL", category = PlaceCategory.FAVORITE, latitude = 11.5490, longitude = 104.9320, addressKm = "បាសាក់", addressEn = "Bassac")
+    }
 
-    // Panel visibility states
-    var leftPanelVisible  by remember { mutableStateOf(true) }
-    var rightPanelVisible by remember { mutableStateOf(true) }
-    var isFullMap         by remember { mutableStateOf(false) }
-
-    Box(modifier = modifier.fillMaxSize().background(EzBgDeep)) {
-
-        // ── Layer 0 : Full-screen live map (Always present in background) ───
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(if (isFullMap) 0.dp else 16.dp))
+            .background(EzCardBg)
+            .border(
+                width = if (isFullMap) 0.dp else 0.5.dp,
+                color = if (isFullMap) Color.Transparent else EzBorderSubtle,
+                shape = RoundedCornerShape(16.dp)
+            )
+    ) {
+        // ── 1. MapLibre 100% Offline Vector/Raster Engine ────────────────────
         CambodiaOfflineMapView(
             vehicleLat          = telemetry.latitude,
             vehicleLng          = telemetry.longitude,
             vehicleHeading      = telemetry.headingDegrees,
             vehicleSpeedKmh     = telemetry.speedKmh,
-            bottomDockPaddingDp = 0,
+            places              = places,
+            navigationState     = navState,
+            selectedPlace       = selectedPlace,
+            recenterTrigger     = recenterTrigger,
+            onPlaceSelected     = onPlaceSelected,
+            bottomDockPaddingDp = if (navState.isNavigating) 80 else 10,
             modifier            = Modifier.fillMaxSize()
         )
 
-        // ── Layer 1 : Top control strip & navigation tabs ───────────────────
-        AnimatedVisibility(
-            visible  = !isFullMap,
-            enter    = slideInVertically(tween(380)) { -it } + fadeIn(tween(380)),
-            exit     = slideOutVertically(tween(320)) { -it } + fadeOut(tween(320)),
-            modifier = Modifier.align(Alignment.TopStart)
-        ) {
-            EzTopStrip(
-                currentLang      = currentLang,
-                themeMode        = themeMode,
-                leftPanelVisible = leftPanelVisible,
-                activeOverlay    = activeOverlay,
-                onSelectOverlay  = { overlay ->
-                    activeOverlay = if (activeOverlay == overlay) CockpitOverlay.NONE else overlay
-                },
-                onToggleLeft     = { leftPanelVisible = !leftPanelVisible },
-                onLanguageToggle = { LanguageManager.toggleLanguage() },
-                onThemeToggle    = {
-                    SolarCalculator.setThemeMode(
-                        when (themeMode) {
-                            ThemeMode.AUTO  -> ThemeMode.DAY
-                            ThemeMode.DAY   -> ThemeMode.NIGHT
-                            ThemeMode.NIGHT -> ThemeMode.AUTO
-                        }
-                    )
-                }
-            )
-        }
+        // ── 2. Top Floating Navigation Banner (When actively navigating) ────
+        if (navState.isNavigating) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xF2121024),
+                border = BorderStroke(1.dp, EzBorderAccent),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(EzAccentCyan.copy(0.2f))
+                            .border(1.dp, EzAccentCyan, RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = when (navState.currentManeuver?.maneuverType) {
+                                ManeuverType.TURN_LEFT -> Icons.Default.TurnLeft
+                                ManeuverType.TURN_RIGHT -> Icons.Default.TurnRight
+                                ManeuverType.SLIGHT_LEFT -> Icons.Default.TurnSlightLeft
+                                ManeuverType.SLIGHT_RIGHT -> Icons.Default.TurnSlightRight
+                                ManeuverType.U_TURN -> Icons.Default.RotateLeft
+                                ManeuverType.ROUNDABOUT -> Icons.Default.Refresh
+                                ManeuverType.ARRIVED -> Icons.Default.CheckCircle
+                                else -> Icons.Default.Straight
+                            },
+                            contentDescription = null,
+                            tint = EzAccentCyan,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
 
-        // ── Layer 2 : Left content area ─────────────────────────────────────
-        // Depending on activeOverlay:
-        // - When NONE: Left search & 5 destinations panel
-        // - When CABIN: Left Cabin Floating Suite (matching EZNav layout)
-        AnimatedVisibility(
-            visible  = leftPanelVisible && !isFullMap && activeOverlay != CockpitOverlay.VOICE && activeOverlay != CockpitOverlay.SPENDING,
-            enter    = slideInHorizontally(tween(380)) { -it } + fadeIn(tween(380)),
-            exit     = slideOutHorizontally(tween(320)) { -it } + fadeOut(tween(320)),
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(start = 12.dp, top = 56.dp, bottom = 12.dp)
-        ) {
-            when (activeOverlay) {
-                CockpitOverlay.CABIN -> {
-                    EzCabinSuite(
-                        currentHal = currentHal,
-                        telemetry  = telemetry,
-                        strings    = strings,
-                        onClose    = { activeOverlay = CockpitOverlay.NONE }
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        val dist = navState.currentManeuver?.distanceMeters ?: 0
+                        val distStr = if (dist >= 1000) String.format("%.1f km", dist / 1000f) else "$dist m"
+                        Text(
+                            text = "$distStr • ${navState.currentManeuver?.roadNameKm ?: navState.destination?.nameKm ?: "កំពុងធ្វើដំណើរ"}",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "${String.format("%.1f", navState.remainingDistanceKm)} km  •  ${navState.remainingMinutes} នាទី  •  ETA ${navState.etaString}  •  ${navState.estimatedArrivalBatteryPercent}% SoC",
+                            fontSize = 11.sp,
+                            color = EzTxtSecondary
+                        )
+                    }
+
+                    // Cancel Navigation Button
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2C1625))
+                            .border(0.5.dp, EzAccentCoral, CircleShape)
+                            .clickable { onStopNavigation() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Stop Navigation",
+                            tint = EzAccentCoral,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
-                else -> {
-                    EzLeftPanel(
-                        strings    = strings,
-                        telemetry  = telemetry,
-                        onNavigate = onNavigateToMap
-                    )
+            }
+        } else {
+            // ── Top Search Bar & Quick Destination Chips (When idle) ────────
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Search Bar: 🔍 ទៅណា?
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xDD121024),
+                    border = BorderStroke(0.5.dp, EzBorderSubtle),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            tint = EzAccentCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = {
+                                searchQuery = it
+                                isSearchActive = it.isNotBlank()
+                            },
+                            placeholder = {
+                                Text("🔍 ទៅណា? / Where to?", fontSize = 12.sp, color = EzTxtMuted)
+                            },
+                            singleLine = true,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                cursorColor = EzAccentCyan,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    searchQuery = ""
+                                    isSearchActive = false
+                                },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Clear,
+                                    contentDescription = "Clear",
+                                    tint = EzTxtMuted,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Instant Search Results Dropdown
+                if (isSearchActive && searchResults.isNotEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xF2121024),
+                        border = BorderStroke(0.5.dp, EzBorderAccent),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp)
+                    ) {
+                        LazyColumn(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+                            items(searchResults.take(5)) { place ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            searchQuery = ""
+                                            isSearchActive = false
+                                            onQuickDestinationClick(place)
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        if (place.isEvCharger) Icons.Default.EvStation else Icons.Default.Place,
+                                        contentDescription = null,
+                                        tint = EzAccentCyan,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            place.nameKm.ifBlank { place.nameEn },
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                        Text(place.nameEn, fontSize = 10.sp, color = EzTxtMuted)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Quick Destination Chips: 🏠 ផ្ទះ, 💼 កន្លែងធ្វើការ, bong ka, ម៉ឺងយ៉ា, KEL
+                if (!isSearchActive) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        EzMapShortcutChip(icon = "🏠", label = "ផ្ទះ", onClick = { onQuickDestinationClick(homePlace) })
+                        EzMapShortcutChip(icon = "💼", label = "កន្លែងធ្វើការ", onClick = { onQuickDestinationClick(workPlace) })
+                        EzMapShortcutChip(icon = "⭐", label = "bong ka", onClick = { onQuickDestinationClick(bongKaPlace) })
+                        EzMapShortcutChip(icon = "⭐", label = "ម៉ឺងយ៉ា", onClick = { onQuickDestinationClick(meungYaPlace) })
+                        EzMapShortcutChip(icon = "⭐", label = "KEL", onClick = { onQuickDestinationClick(kelPlace) })
+                    }
                 }
             }
         }
 
-        // ── Layer 3 : Right floating dashboard card ─────────────────────────
-        AnimatedVisibility(
-            visible  = rightPanelVisible && !isFullMap && activeOverlay != CockpitOverlay.VOICE && activeOverlay != CockpitOverlay.SPENDING,
-            enter    = slideInHorizontally(tween(380)) { it } + fadeIn(tween(380)),
-            exit     = slideOutHorizontally(tween(320)) { it } + fadeOut(tween(320)),
+        // ── 3. Bottom-Left Floating Voice Assistant FAB ─────────────────────
+        Box(
             modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(end = 12.dp, top = 56.dp)
+                .align(Alignment.BottomStart)
+                .padding(start = 14.dp, bottom = 14.dp)
+                .size(48.dp)
+                .ezGlow(EzAccentPurple, 8.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(listOf(EzAccentPurple.copy(0.45f), EzCardBg))
+                )
+                .border(1.dp, EzAccentPurple.copy(0.7f), CircleShape)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onOpenVoice() },
+            contentAlignment = Alignment.Center
         ) {
-            EzRightDashboard(
-                clock     = clock,
-                telemetry = telemetry,
-                chankitek = chankitek,
-                strings   = strings,
-                onNavigateToSpending = { activeOverlay = CockpitOverlay.SPENDING },
-                onNavigateToCabin    = { activeOverlay = CockpitOverlay.CABIN }
+            Icon(
+                imageVector        = Icons.Default.Mic,
+                contentDescription = "Voice",
+                tint               = Color.White,
+                modifier           = Modifier.size(20.dp)
             )
         }
 
-        // ── Layer 4 : Modal Overlays (Voice / Spending) ─────────────────────
-        AnimatedVisibility(
-            visible  = activeOverlay == CockpitOverlay.VOICE,
-            enter    = fadeIn(tween(300)) + scaleIn(initialScale = 0.95f),
-            exit     = fadeOut(tween(250)) + scaleOut(targetScale = 0.95f),
-            modifier = Modifier
-                .align(Alignment.Center)
-                .padding(top = 50.dp, bottom = 16.dp, start = 20.dp, end = 20.dp)
-        ) {
-            EzVoiceModal(
-                currentHal    = currentHal,
-                voiceService  = voiceService,
-                navController = navController,
-                onClose       = { activeOverlay = CockpitOverlay.NONE }
-            )
-        }
-
-        AnimatedVisibility(
-            visible  = activeOverlay == CockpitOverlay.SPENDING,
-            enter    = fadeIn(tween(300)) + scaleIn(initialScale = 0.95f),
-            exit     = fadeOut(tween(250)) + scaleOut(targetScale = 0.95f),
-            modifier = Modifier
-                .align(Alignment.Center)
-                .padding(top = 50.dp, bottom = 16.dp, start = 20.dp, end = 20.dp)
-        ) {
-            EzSpendingModal(
-                currentHal = currentHal,
-                gapEngine  = gapEngine,
-                gapSummary = gapSummary,
-                onClose    = { activeOverlay = CockpitOverlay.NONE }
-            )
-        }
-
-        // ── Layer 5 : Floating map control buttons ───────────────────────────
-        // AC toggle button — on the map
-        AnimatedVisibility(
-            visible  = !isFullMap && activeOverlay == CockpitOverlay.NONE,
-            enter    = fadeIn(), exit = fadeOut(),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 380.dp, end = 16.dp)
-        ) {
-            EzMapPill(
-                label   = "AC",
-                isOn    = telemetry.hvacState.isAcOn,
-                onClick = { coroutineScope.launch { currentHal.setAcMode(ac = !telemetry.hvacState.isAcOn) } }
-            )
-        }
-
-        // Fullscreen toggle & zoom buttons — bottom-right of map
+        // ── 4. Bottom-Right Floating Map Controls & Maximize Button ─────────
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 14.dp, bottom = 18.dp),
+                .padding(end = 14.dp, bottom = 14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Fullscreen Map Maximize / Restore Toggle Button
             EzMapIconBtn(
-                icon    = if (isFullMap) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                onClick = {
-                    isFullMap         = !isFullMap
-                    if (isFullMap) { leftPanelVisible = false; rightPanelVisible = false }
-                    else           { leftPanelVisible = true;  rightPanelVisible = true  }
-                }
+                icon = if (isFullMap) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                onClick = onToggleFullMap
             )
-            EzMapIconBtn(icon = Icons.Default.Add,    onClick = { navController?.zoomIn() })
-            EzMapIconBtn(icon = Icons.Default.Remove, onClick = { navController?.zoomOut() })
+            // Recenter Vehicle GPS Position Button
+            EzMapIconBtn(icon = Icons.Default.NearMe, onClick = onRecenter)
+            // Zoom In
+            EzMapIconBtn(icon = Icons.Default.Add, onClick = onZoomIn)
+            // Zoom Out
+            EzMapIconBtn(icon = Icons.Default.Remove, onClick = onZoomOut)
         }
+    }
+}
 
-        // Cabin shortcut — bottom-left
-        AnimatedVisibility(
-            visible  = !isFullMap && activeOverlay == CockpitOverlay.NONE,
-            enter    = fadeIn(), exit = fadeOut(),
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 14.dp, bottom = 18.dp)
+// ═══════════════════════════════════════════════════════════════════════════
+// Map Shortcut Chip for Driver Destinations
+// ═══════════════════════════════════════════════════════════════════════════
+@Composable
+fun EzMapShortcutChip(
+    icon: String,
+    label: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = Color(0xDD1E1B35),
+        border = BorderStroke(0.5.dp, EzBorderSubtle),
+        modifier = Modifier.clickable { onClick() }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            EzCabinChip(onClick = { activeOverlay = CockpitOverlay.CABIN })
-        }
-
-        // Voice microphone FAB — bottom-center
-        AnimatedVisibility(
-            visible  = !isFullMap && activeOverlay == CockpitOverlay.NONE,
-            enter    = fadeIn(), exit = fadeOut(),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 16.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(52.dp)
-                    .ezGlow(EzAccentPurple, 10.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(listOf(EzAccentPurple.copy(0.4f), EzCardBg))
-                    )
-                    .border(1.dp, EzAccentPurple.copy(0.7f), CircleShape)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { activeOverlay = CockpitOverlay.VOICE },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector        = Icons.Default.Mic,
-                    contentDescription = "Voice",
-                    tint               = EzTxtPrimary,
-                    modifier           = Modifier.size(22.dp)
-                )
-            }
+            Text(icon, fontSize = 10.sp)
+            Text(
+                label,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -775,130 +1229,193 @@ fun EzCabinSuite(
     val tpms = telemetry.tpmsState
 
     var activeTempZone by remember { mutableStateOf(Zone.DRIVER) }
-    var selectedPreset by remember { mutableStateOf("M1") }
 
-    LazyColumn(
+    Column(
         modifier = modifier
-            .width(460.dp)
-            .fillMaxHeight(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .fillMaxWidth()
+            .fillMaxHeight()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         // ── 1. Top Vehicle Overview Card ─────────────────────────────────────
-        item {
-            Box(
+        Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .background(EzCardBg)
-                    .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(16.dp))
-                    .padding(12.dp)
+                    .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(14.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
             ) {
-                Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        // AEB status chip
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF1E1B35))
-                                .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(8.dp))
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(Icons.Default.PowerSettingsNew, contentDescription = null, tint = EzAccentCyan, modifier = Modifier.size(12.dp))
-                                Text("AEB", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
-                            }
-                        }
-
-                        // Right Telemetry Stats
-                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("BATTERY", fontSize = 10.sp, color = EzTxtMuted)
-                                Text("${telemetry.batteryPercent}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("ថាមពលអគ្គិសនី", fontSize = 10.sp, color = EzTxtMuted)
-                                Text("${telemetry.evRangeKm} km", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EzAccentCyan)
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("ប្រេងឥន្ធនៈ", fontSize = 10.sp, color = EzTxtMuted)
-                                Text("${telemetry.fuelRangeKm} km", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EzAccentAmber)
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("ODOMETER", fontSize = 10.sp, color = EzTxtMuted)
-                                Text("${telemetry.odometerKm.toLong()} km", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EzTxtSecondary)
-                            }
-                        }
-                    }
-
-                    // Sleek Geely Galaxy M7 Silhouette
-                    EzCarSideProfile(
-                        batteryPercent = telemetry.batteryPercent,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(115.dp)
-                            .padding(vertical = 4.dp)
-                    )
-
-                    // Bottom Row: "កាប៊ីន" title + M1, M2, M3 preset chips
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // Top Telemetry Header Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "កាប៊ីន",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Black,
-                            color = EzTxtPrimary
-                        )
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("M1", "M2", "M3").forEach { preset ->
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (selectedPreset == preset) Color.White else Color(0xFF1E1B35))
-                                        .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(8.dp))
-                                        .clickable { selectedPreset = preset }
-                                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = preset,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (selectedPreset == preset) Color(0xFF0D0B1A) else EzTxtSecondary
-                                    )
+                        // AEB & Gear Status
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFF1E1B35))
+                                    .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Icon(Icons.Default.PowerSettingsNew, contentDescription = null, tint = EzAccentCyan, modifier = Modifier.size(10.dp))
+                                    Text("AEB", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
                                 }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(EzAccentEmerald.copy(0.18f))
+                                    .border(0.5.dp, EzAccentEmerald.copy(0.5f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(telemetry.gear.name, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzAccentEmerald)
+                            }
+                        }
+
+                        // Compact Telemetry Metrics
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("⚡", fontSize = 9.sp)
+                                Text("${telemetry.evRangeKm}km", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzAccentCyan)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("⛽", fontSize = 9.sp)
+                                Text("${telemetry.fuelRangeKm}km", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzAccentAmber)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("🔋", fontSize = 9.sp)
+                                Text("${telemetry.batteryPercent}%", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
+                            }
+                            Text("${telemetry.odometerKm.toLong()}km", fontSize = 9.sp, color = EzTxtMuted)
+                        }
+                    }
+
+                    // Real 2026 Geely Galaxy M7 Full Photo (Complete car with wheels and bumpers visible)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(130.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF070611))
+                            .border(0.5.dp, EzBorderSubtle.copy(0.4f), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.geely_galaxy_m7),
+                            contentDescription = "Geely Galaxy M7",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                        // Subtle gradient edge fades so showroom photo melts seamlessly into card
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.horizontalGradient(
+                                        0.0f to Color(0xFF070611),
+                                        0.10f to Color.Transparent,
+                                        0.90f to Color.Transparent,
+                                        1.0f to Color(0xFF070611)
+                                    )
+                                )
+                        )
+                    }
+
+                    // Actual 2026 Geely Galaxy M7 (Thor EM-P) Drive Modes
+                    // Modes: PURE EV (纯电), SMART (智能), POWER (性能), RANGE EXT (增程 / 保电)
+                    val geelyModes = listOf(
+                        GeelyDriveMode.PURE_EV to "PURE EV",
+                        GeelyDriveMode.SMART to "SMART",
+                        GeelyDriveMode.POWER to "POWER",
+                        GeelyDriveMode.RANGE_EXT to "RANGE EXT"
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        geelyModes.forEach { (mode, label) ->
+                            val isSelected = telemetry.driveMode == mode
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(if (isSelected) EzAccentCyan.copy(0.25f) else Color(0xFF1E1B35))
+                                    .border(
+                                        0.5.dp,
+                                        if (isSelected) EzAccentCyan else EzBorderSubtle,
+                                        RoundedCornerShape(7.dp)
+                                    )
+                                    .clickable {
+                                        coroutineScope.launch { currentHal.setDriveMode(mode) }
+                                    }
+                                    .padding(vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) EzAccentCyan else EzTxtSecondary
+                                )
                             }
                         }
                     }
+
                 }
             }
-        }
 
-        // ── 2. Climate Control Card ("ម៉ាស៊ីនត្រជាក់") ────────────────────────
-        item {
-            Column(
+        // ── 2. Climate Control Card (Real Geely Galaxy M7 Flyme Auto Functions) ──
+        Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .background(EzCardBg)
-                    .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(16.dp))
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(14.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                // Header with Khmer title
+                // Header with Khmer title and Master Power Toggle
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("FAN SPEED", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzTxtMuted, letterSpacing = 0.5.sp)
-                    Text("ម៉ាស៊ីនត្រជាក់", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text("ម៉ាស៊ីនត្រជាក់ (HVAC)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(if (hvac.isPowerOn) EzAccentCyan.copy(0.2f) else Color(0xFF1E1B35))
+                                .border(0.5.dp, if (hvac.isPowerOn) EzAccentCyan else EzBorderSubtle, CircleShape)
+                                .clickable { coroutineScope.launch { currentHal.setHvacPower(!hvac.isPowerOn) } }
+                                .padding(3.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.PowerSettingsNew,
+                                contentDescription = "HVAC Power",
+                                tint = if (hvac.isPowerOn) EzAccentCyan else EzTxtMuted,
+                                modifier = Modifier.size(10.dp)
+                            )
+                        }
+                    }
+                    Text("FAN SPEED ${hvac.fanSpeed}/7", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = EzTxtMuted, letterSpacing = 0.5.sp)
                 }
 
                 // 7-speed vertical bars
@@ -910,37 +1427,70 @@ fun EzCabinSuite(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Quick buttons Row 1: A/C, AUTO, MAX, RECIRC
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    EzClimatePill(label = "❄ A/C", isActive = hvac.isAcOn, modifier = Modifier.weight(1f)) {
+                // Real Geely Galaxy M7 Flyme Auto Functions: Row 1
+                // ❄ A/C (Compressor), AUTO (Intelligent Auto), MAX A/C (Rapid Cooling), SYNC (Dual-Zone Sync)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    EzClimatePill(
+                        label = "❄ A/C",
+                        isActive = hvac.isAcOn,
+                        modifier = Modifier.weight(1f)
+                    ) {
                         coroutineScope.launch { currentHal.setAcMode(ac = !hvac.isAcOn) }
                     }
-                    EzClimatePill(label = "AUTO", isActive = hvac.isAutoOn, isHighlightWhite = true, modifier = Modifier.weight(1f)) {
+                    EzClimatePill(
+                        label = "AUTO",
+                        isActive = hvac.isAutoOn,
+                        isHighlightWhite = true,
+                        modifier = Modifier.weight(1f)
+                    ) {
                         coroutineScope.launch { currentHal.setAcMode(auto = !hvac.isAutoOn) }
                     }
-                    EzClimatePill(label = "MAX", isActive = hvac.isMaxAcOn, modifier = Modifier.weight(1f)) {
+                    EzClimatePill(
+                        label = "MAX A/C",
+                        isActive = hvac.isMaxAcOn,
+                        modifier = Modifier.weight(1.1f)
+                    ) {
                         coroutineScope.launch { currentHal.setAcMode(maxAc = !hvac.isMaxAcOn) }
                     }
-                    EzClimatePill(label = "RECIRC", isActive = hvac.isRecircOn, modifier = Modifier.weight(1.1f)) {
-                        coroutineScope.launch { currentHal.setAcMode(recirc = !hvac.isRecircOn) }
+                    EzClimatePill(
+                        label = "SYNC",
+                        isActive = hvac.isSyncOn,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        coroutineScope.launch { currentHal.setAcMode(sync = !hvac.isSyncOn) }
                     }
                 }
 
-                // Quick buttons Row 2: FRONT, REAR, WHEEL, SYNC
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    EzClimatePill(label = "FRONT", isActive = hvac.isFrontDefrostOn, modifier = Modifier.weight(1f)) {
+                // Real Geely Galaxy M7 Flyme Auto Functions: Row 2
+                // RECIRC (Recirculation), FRONT DEF (Defrost), REAR DEF (Defog), CLEAN AIR (CleanZone Ion Purifier)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    EzClimatePill(
+                        label = "RECIRC",
+                        isActive = hvac.isRecircOn,
+                        modifier = Modifier.weight(1.05f)
+                    ) {
+                        coroutineScope.launch { currentHal.setAcMode(recirc = !hvac.isRecircOn) }
+                    }
+                    EzClimatePill(
+                        label = "FRONT DEF",
+                        isActive = hvac.isFrontDefrostOn,
+                        modifier = Modifier.weight(1.15f)
+                    ) {
                         coroutineScope.launch { currentHal.setAcMode(frontDefrost = !hvac.isFrontDefrostOn) }
                     }
-                    EzClimatePill(label = "REAR", isActive = hvac.isRearDefrostOn, modifier = Modifier.weight(1f)) {
+                    EzClimatePill(
+                        label = "REAR DEF",
+                        isActive = hvac.isRearDefrostOn,
+                        modifier = Modifier.weight(1.1f)
+                    ) {
                         coroutineScope.launch { currentHal.setAcMode(rearDefrost = !hvac.isRearDefrostOn) }
                     }
-                    EzClimatePill(label = "WHEEL", isActive = false, modifier = Modifier.weight(1f)) {
-                        // Heated steering wheel toggle
-                    }
-                    EzClimatePill(label = "SYNC", isActive = true, modifier = Modifier.weight(1f)) {
-                        coroutineScope.launch {
-                            currentHal.setTemperature(Zone.PASSENGER, hvac.driverTempC)
-                        }
+                    EzClimatePill(
+                        label = "CLEAN AIR",
+                        isActive = hvac.isCleanAirOn,
+                        modifier = Modifier.weight(1.2f)
+                    ) {
+                        coroutineScope.launch { currentHal.setAcMode(cleanAir = !hvac.isCleanAirOn) }
                     }
                 }
 
@@ -956,28 +1506,26 @@ fun EzCabinSuite(
                     modifier = Modifier.fillMaxWidth()
                 )
             }
-        }
 
         // ── 3. Bottom Row Cards (Windows/Doors, Roof/Tailgate, TPMS) ─────────
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
                 // Windows & Doors
                 Column(
                     modifier = Modifier
-                        .weight(1.1f)
-                        .clip(RoundedCornerShape(14.dp))
+                        .weight(1.05f)
+                        .clip(RoundedCornerShape(12.dp))
                         .background(EzCardBg)
-                        .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(14.dp))
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(12.dp))
+                        .padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text("កញ្ចក់ និងទ្វារ", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzTxtMuted)
+                    Text("កញ្ចក់ និងទ្វារ", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = EzTxtMuted)
 
                     // 4 window status pills
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                         EzWindowBadge("FL", cabin.windowFlPercent, Modifier.weight(1f)) {
                             coroutineScope.launch {
                                 currentHal.setWindowPosition(WindowTarget.FRONT_LEFT, if (cabin.windowFlPercent > 0) 0 else 100)
@@ -989,7 +1537,7 @@ fun EzCabinSuite(
                             }
                         }
                     }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                         EzWindowBadge("RL", cabin.windowRlPercent, Modifier.weight(1f)) {
                             coroutineScope.launch {
                                 currentHal.setWindowPosition(WindowTarget.REAR_LEFT, if (cabin.windowRlPercent > 0) 0 else 100)
@@ -1006,24 +1554,24 @@ fun EzCabinSuite(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(6.dp))
                             .background(if (cabin.isDoorsLocked) Color.White else Color(0xFF1E1B35))
                             .clickable {
                                 coroutineScope.launch { currentHal.setDoorLocks(!cabin.isDoorsLocked) }
                             }
-                            .padding(vertical = 7.dp),
+                            .padding(vertical = 5.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                             Icon(
                                 if (cabin.isDoorsLocked) Icons.Default.Lock else Icons.Default.LockOpen,
                                 contentDescription = null,
                                 tint = if (cabin.isDoorsLocked) Color(0xFF0D0B1A) else EzTxtPrimary,
-                                modifier = Modifier.size(13.dp)
+                                modifier = Modifier.size(11.dp)
                             )
                             Text(
                                 if (cabin.isDoorsLocked) "Locked • All" else "Unlocked",
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (cabin.isDoorsLocked) Color(0xFF0D0B1A) else EzTxtPrimary
                             )
@@ -1035,36 +1583,36 @@ fun EzCabinSuite(
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .background(EzCardBg)
-                        .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(14.dp))
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(12.dp))
+                        .padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text("Roof shade", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzTxtMuted)
+                    Text("ដំបូល & គូទ", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = EzTxtMuted)
 
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .clip(RoundedCornerShape(6.dp))
+                                .clip(RoundedCornerShape(5.dp))
                                 .background(Color(0xFF1E1B35))
                                 .clickable { coroutineScope.launch { currentHal.setSunroofAndShade(shadePercent = 100) } }
-                                .padding(vertical = 6.dp),
+                                .padding(vertical = 5.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("▲ OPEN", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
+                            Text("▲ OPEN", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
                         }
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .clip(RoundedCornerShape(6.dp))
+                                .clip(RoundedCornerShape(5.dp))
                                 .background(Color(0xFF1E1B35))
                                 .clickable { coroutineScope.launch { currentHal.setSunroofAndShade(shadePercent = 0) } }
-                                .padding(vertical = 6.dp),
+                                .padding(vertical = 5.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("▼ CLOSE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
+                            Text("▼ CLOSE", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
                         }
                     }
 
@@ -1072,9 +1620,9 @@ fun EzCabinSuite(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(6.dp))
                             .background(if (cabin.isTailgateOpen) EzAccentCoral.copy(0.25f) else Color(0xFF1E1B35))
-                            .border(0.5.dp, if (cabin.isTailgateOpen) EzAccentCoral else EzBorderSubtle, RoundedCornerShape(8.dp))
+                            .border(0.5.dp, if (cabin.isTailgateOpen) EzAccentCoral else EzBorderSubtle, RoundedCornerShape(6.dp))
                             .clickable {
                                 val willOpen = !cabin.isTailgateOpen
                                 if (willOpen && (telemetry.gear != GearState.P || telemetry.speedKmh > 0f)) {
@@ -1087,12 +1635,12 @@ fun EzCabinSuite(
                                     coroutineScope.launch { currentHal.setTailgate(willOpen) }
                                 }
                             }
-                            .padding(vertical = 7.dp),
+                            .padding(vertical = 5.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (cabin.isTailgateOpen) "Close tailgate" else "Open tailgate",
-                            fontSize = 11.sp,
+                            text = if (cabin.isTailgateOpen) "Close Trunk" else "Open Trunk",
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (cabin.isTailgateOpen) EzAccentCoral else EzTxtPrimary
                         )
@@ -1102,14 +1650,14 @@ fun EzCabinSuite(
                 // TPMS 4-Tire Pressure Card
                 Column(
                     modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
+                        .weight(0.95f)
+                        .clip(RoundedCornerShape(12.dp))
                         .background(EzCardBg)
-                        .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(14.dp))
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(12.dp))
+                        .padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text("សម្ពាធកង់", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzTxtMuted)
+                    Text("សម្ពាធកង់", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = EzTxtMuted)
                     EzCarTopTpms(
                         flBar = tpms.flBar,
                         frBar = tpms.frBar,
@@ -1119,9 +1667,179 @@ fun EzCabinSuite(
                     )
                 }
             }
+
+        // ── 4. Quick Vehicle Functions & Driving Energy Status ─────────────────
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(EzCardBg)
+                .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(14.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "មុខងាររហ័ស & ថាមពល (Quick Controls & Energy)",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EzTxtPrimary
+                    )
+                    Text(
+                        text = "THOR EM-P",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EzAccentCyan,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+
+                // Row 1: 4 Quick Automotive Action Chips
+                var isMirrorsFolded by remember { mutableStateOf(false) }
+                var isAmbientLightOn by remember { mutableStateOf(true) }
+                var isAutoHeadlamps by remember { mutableStateOf(true) }
+                var isChildLockOn by remember { mutableStateOf(true) }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    EzQuickFeatureToggle(
+                        icon = Icons.Default.FlipCameraAndroid,
+                        label = "បត់កញ្ចក់",
+                        subLabel = "Mirrors",
+                        isActive = isMirrorsFolded,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        isMirrorsFolded = !isMirrorsFolded
+                    }
+                    EzQuickFeatureToggle(
+                        icon = Icons.Default.Lightbulb,
+                        label = "ភ្លើងបំភ្លឺ",
+                        subLabel = "Ambient",
+                        isActive = isAmbientLightOn,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        isAmbientLightOn = !isAmbientLightOn
+                    }
+                    EzQuickFeatureToggle(
+                        icon = Icons.Default.Highlight,
+                        label = "ចង្កៀងមុខ",
+                        subLabel = "Headlamps",
+                        isActive = isAutoHeadlamps,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        isAutoHeadlamps = !isAutoHeadlamps
+                    }
+                    EzQuickFeatureToggle(
+                        icon = Icons.Default.ChildCare,
+                        label = "សោកុមារ",
+                        subLabel = "Child Lock",
+                        isActive = isChildLockOn,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        isChildLockOn = !isChildLockOn
+                    }
+                }
+
+                // Row 2: Powertrain & Hybrid Efficiency Metrics
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF141226))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("⚡", fontSize = 11.sp)
+                        Column {
+                            Text("ម៉ូទ័រ / Motor Power", fontSize = 8.sp, color = EzTxtMuted)
+                            Text("${if (telemetry.speedKmh > 0) (telemetry.speedKmh * 0.45f).toInt() else 0} kW", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzAccentCyan)
+                        }
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("🔋", fontSize = 11.sp)
+                        Column {
+                            Text("កម្រិតប្រើប្រាស់ / Avg", fontSize = 8.sp, color = EzTxtMuted)
+                            Text("15.6 kWh/100km", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzAccentEmerald)
+                        }
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("🔄", fontSize = 11.sp)
+                        Column {
+                            Text("Regen / ចាប់ហ្វ្រាំង", fontSize = 8.sp, color = EzTxtMuted)
+                            Text("High (ខ្លាំង)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzAccentAmber)
+                        }
+                    }
+                }
+            }
         }
     }
 }
+
+
+@Composable
+private fun EzQuickFeatureToggle(
+    icon: ImageVector,
+    label: String,
+    subLabel: String,
+    isActive: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(7.dp))
+            .background(if (isActive) EzAccentCyan.copy(0.18f) else Color(0xFF1E1B35))
+            .border(0.5.dp, if (isActive) EzAccentCyan.copy(0.6f) else EzBorderSubtle, RoundedCornerShape(7.dp))
+            .clickable(remember { MutableInteractionSource() }, null) { onClick() }
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (isActive) EzAccentCyan else EzTxtMuted,
+                modifier = Modifier.size(13.dp)
+            )
+            Text(
+                text = label,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isActive) EzAccentCyan else EzTxtPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = subLabel,
+                fontSize = 8.sp,
+                color = EzTxtMuted,
+                maxLines = 1
+            )
+        }
+    }
+}
+
 
 @Composable
 private fun EzClimatePill(
@@ -1133,7 +1851,7 @@ private fun EzClimatePill(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(6.dp))
             .background(
                 when {
                     isActive && isHighlightWhite -> Color.White
@@ -1144,15 +1862,15 @@ private fun EzClimatePill(
             .border(
                 0.5.dp,
                 if (isActive && !isHighlightWhite) EzAccentCyan.copy(0.6f) else EzBorderSubtle,
-                RoundedCornerShape(8.dp)
+                RoundedCornerShape(6.dp)
             )
             .clickable(remember { MutableInteractionSource() }, null) { onClick() }
-            .padding(vertical = 8.dp),
+            .padding(vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             color = when {
                 isActive && isHighlightWhite -> Color(0xFF0D0B1A)
@@ -1172,16 +1890,16 @@ private fun EzWindowBadge(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(5.dp))
             .background(if (percent > 0) EzAccentCyan.copy(0.18f) else Color(0xFF1E1B35))
-            .border(0.5.dp, if (percent > 0) EzAccentCyan.copy(0.5f) else EzBorderSubtle, RoundedCornerShape(6.dp))
+            .border(0.5.dp, if (percent > 0) EzAccentCyan.copy(0.5f) else EzBorderSubtle, RoundedCornerShape(5.dp))
             .clickable(remember { MutableInteractionSource() }, null) { onClick() }
-            .padding(vertical = 4.dp),
+            .padding(vertical = 5.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = if (percent > 0) "$label Open" else "$label Shut",
-            fontSize = 9.sp,
+            fontSize = 8.sp,
             fontWeight = FontWeight.Bold,
             color = if (percent > 0) EzAccentCyan else EzTxtSecondary
         )
