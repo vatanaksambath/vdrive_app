@@ -1,0 +1,293 @@
+{
+  "vehicleModel": "2026 Geely Galaxy M7 (Flyme Auto / ECARX)",
+  "schemaVersion": 1,
+  "lastUpdated": 1730000000000,
+  "mappings": {
+    "ODOMETER": {
+      "actionName": "ODOMETER",
+      "propId": 291504644,
+      "areaId": 0,
+      "dataType": "FLOAT",
+      "ecarxFunctionId": 0,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Hardware total distance traveled in km (PERF_ODOMETER 0x11600204)"
+    },
+    "SPEED": {
+      "actionName": "SPEED",
+      "propId": 291504647,
+      "areaId": 0,
+      "dataType": "FLOAT",
+      "ecarxFunctionId": 4112,
+      "ecarxZone": 0,
+      "scaleFactor": 3.6,
+      "offset": 0.0,
+      "description": "Instantaneous vehicle speed in km/h (PERF_VEHICLE_SPEED 0x11600207)"
+    },
+    "GEAR": {
+      "actionName": "GEAR",
+      "propId": 289408000,
+      "areaId": 0,
+      "dataType": "INT",
+      "ecarxFunctionId": 0,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Transmission gear: 1=P, 2=R, 4=N, 8=D (0x11400400)"
+    },
+    "BATTERY_LEVEL": {
+      "actionName": "BATTERY_LEVEL",
+      "propId": 291504905,
+      "areaId": 0,
+      "dataType": "FLOAT",
+      "ecarxFunctionId": 4128,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "PHEV Battery state of charge % (EV_BATTERY_LEVEL 0x11600309)"
+    },
+    "HVAC_POWER": {
+      "actionName": "HVAC_POWER",
+      "propId": 354419968,
+      "areaId": 1,
+      "dataType": "BOOLEAN",
+      "ecarxFunctionId": 4097,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "HVAC Master System Power (0x15200500)"
+    },
+    "TEMP_DRIVER": {
+      "actionName": "TEMP_DRIVER",
+      "propId": 358614275,
+      "areaId": 1,
+      "dataType": "FLOAT",
+      "ecarxFunctionId": 4098,
+      "ecarxZone": 1,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Driver side temperature setpoint in °C (0x15600503)"
+    },
+    "TEMP_PASSENGER": {
+      "actionName": "TEMP_PASSENGER",
+      "propId": 358614275,
+      "areaId": 4,
+      "dataType": "FLOAT",
+      "ecarxFunctionId": 4098,
+      "ecarxZone": 2,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Passenger side temperature setpoint in °C (0x15600503)"
+    },
+    "FAN_SPEED": {
+      "actionName": "FAN_SPEED",
+      "propId": 356517120,
+      "areaId": 1,
+      "dataType": "INT",
+      "ecarxFunctionId": 4099,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Blower fan speed 1..7 (0x15400500)"
+    },
+    "AC_SWITCH": {
+      "actionName": "AC_SWITCH",
+      "propId": 354420005,
+      "areaId": 1,
+      "dataType": "BOOLEAN",
+      "ecarxFunctionId": 4100,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "A/C compressor clutch (0x15200505)"
+    },
+    "AUTO_SWITCH": {
+      "actionName": "AUTO_SWITCH",
+      "propId": 354420010,
+      "areaId": 1,
+      "dataType": "BOOLEAN",
+      "ecarxFunctionId": 4101,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Auto climate control (0x1520050A)"
+    },
+    "RECIRC_SWITCH": {
+      "actionName": "RECIRC_SWITCH",
+      "propId": 354420008,
+      "areaId": 1,
+      "dataType": "BOOLEAN",
+      "ecarxFunctionId": 4102,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Air recirculation flap (0x15200508)"
+    },
+    "DEFROST_FRONT": {
+      "actionName": "DEFROST_FRONT",
+      "propId": 320865540,
+      "areaId": 1,
+      "dataType": "BOOLEAN",
+      "ecarxFunctionId": 4103,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Windshield front defrost (0x13200504)"
+    },
+    "WINDOW_FL": {
+      "actionName": "WINDOW_FL",
+      "propId": 322964416,
+      "areaId": 1,
+      "dataType": "INT",
+      "ecarxFunctionId": 8193,
+      "ecarxZone": 1,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Front Left Window position 0..100% (0x13400BC0)"
+    },
+    "WINDOW_FR": {
+      "actionName": "WINDOW_FR",
+      "propId": 322964416,
+      "areaId": 4,
+      "dataType": "INT",
+      "ecarxFunctionId": 8194,
+      "ecarxZone": 2,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Front Right Window position 0..100% (0x13400BC0)"
+    },
+    "WINDOW_RL": {
+      "actionName": "WINDOW_RL",
+      "propId": 322964416,
+      "areaId": 16,
+      "dataType": "INT",
+      "ecarxFunctionId": 8195,
+      "ecarxZone": 3,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Rear Left Window position 0..100% (0x13400BC0)"
+    },
+    "WINDOW_RR": {
+      "actionName": "WINDOW_RR",
+      "propId": 322964416,
+      "areaId": 64,
+      "dataType": "INT",
+      "ecarxFunctionId": 8196,
+      "ecarxZone": 4,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Rear Right Window position 0..100% (0x13400BC0)"
+    },
+    "SUNROOF": {
+      "actionName": "SUNROOF",
+      "propId": 536870913,
+      "areaId": 0,
+      "dataType": "INT",
+      "ecarxFunctionId": 8197,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Panoramic Sunroof glass 0..100% (Vendor 0x20000001)"
+    },
+    "SUNSHADE": {
+      "actionName": "SUNSHADE",
+      "propId": 536870914,
+      "areaId": 0,
+      "dataType": "INT",
+      "ecarxFunctionId": 8198,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Sunroof electric shade 0..100% (Vendor 0x20000002)"
+    },
+    "CENTRAL_LOCK": {
+      "actionName": "CENTRAL_LOCK",
+      "propId": 371198722,
+      "areaId": 0,
+      "dataType": "BOOLEAN",
+      "ecarxFunctionId": 8200,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Central door locks true=locked (0x16200B02)"
+    },
+    "TAILGATE": {
+      "actionName": "TAILGATE",
+      "propId": 536870915,
+      "areaId": 0,
+      "dataType": "BOOLEAN",
+      "ecarxFunctionId": 8199,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Geely M7 powered smart tailgate true=open (Vendor 0x20000003)"
+    },
+    "SEAT_VENT_FL": {
+      "actionName": "SEAT_VENT_FL",
+      "propId": 536870916,
+      "areaId": 1,
+      "dataType": "INT",
+      "ecarxFunctionId": 12289,
+      "ecarxZone": 1,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Driver seat ventilation 0..3 (Vendor 0x20000004)"
+    },
+    "SEAT_VENT_FR": {
+      "actionName": "SEAT_VENT_FR",
+      "propId": 536870917,
+      "areaId": 4,
+      "dataType": "INT",
+      "ecarxFunctionId": 12290,
+      "ecarxZone": 2,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Passenger seat ventilation 0..3 (Vendor 0x20000005)"
+    },
+    "SEAT_HEAT_FL": {
+      "actionName": "SEAT_HEAT_FL",
+      "propId": 536870918,
+      "areaId": 1,
+      "dataType": "INT",
+      "ecarxFunctionId": 12291,
+      "ecarxZone": 1,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Driver seat heating 0..3 (Vendor 0x20000006)"
+    },
+    "AMBIENT_LIGHT_SWITCH": {
+      "actionName": "AMBIENT_LIGHT_SWITCH",
+      "propId": 536870919,
+      "areaId": 0,
+      "dataType": "BOOLEAN",
+      "ecarxFunctionId": 16385,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Geely M7 256-color ambient lighting power (Vendor 0x20000007)"
+    },
+    "AMBIENT_LIGHT_COLOR": {
+      "actionName": "AMBIENT_LIGHT_COLOR",
+      "propId": 536870920,
+      "areaId": 0,
+      "dataType": "INT",
+      "ecarxFunctionId": 16386,
+      "ecarxZone": 0,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Geely M7 ambient light color RGB hex (Vendor 0x20000008)"
+    },
+    "TPMS_PRESSURE_FL": {
+      "actionName": "TPMS_PRESSURE_FL",
+      "propId": 392168201,
+      "areaId": 1,
+      "dataType": "FLOAT",
+      "ecarxFunctionId": 0,
+      "ecarxZone": 1,
+      "scaleFactor": 1.0,
+      "offset": 0.0,
+      "description": "Front left tire pressure in Bar (TIRE_PRESSURE 0x17600309)"
+    }
+  }
+}

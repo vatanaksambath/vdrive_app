@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">VDrive</string>
+    <string name="app_tagline">Khmer In-Car Navigation &amp; Cabin Control</string>
+    <string name="flyme_auto">Flyme Auto / ECARX</string>
+    <string name="notification_channel_name">VDrive Car Bridge</string>
+    <string name="notification_channel_desc">Active Wi-Fi HAL Bridge Server for Remote Tablet</string>
+</resources>
