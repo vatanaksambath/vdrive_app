@@ -78,6 +78,9 @@ class MainActivity : ComponentActivity() {
                                     "cockpit" -> CockpitScreen(
                                         currentHal = app.currentHal,
                                         gapSummary = gapSummary,
+                                        voiceService = app.voiceService,
+                                        navController = app.navigationController,
+                                        gapEngine = app.gapEngine,
                                         onDismissGapSummary = { app.gapEngine.dismissSummary() },
                                         onNavigateToCabin = { currentScreen = "cabin" },
                                         onNavigateToDiagnostics = { currentScreen = "diagnostics" },
