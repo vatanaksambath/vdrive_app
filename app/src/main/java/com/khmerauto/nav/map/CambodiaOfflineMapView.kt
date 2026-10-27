@@ -133,8 +133,6 @@ fun CambodiaOfflineMapView(
                 .withIconImage(VEHICLE_PUCK_ICON_ID)
                 .withIconRotate(vehicleHeading)
                 .withIconSize(1.3f)
-                .withIconIgnorePlacement(true)
-                .withIconAllowOverlap(true)
             vehicleSymbolInstance = sm.create(options)
         } else {
             currentPuck.latLng = LatLng(vehicleLat, vehicleLng)
