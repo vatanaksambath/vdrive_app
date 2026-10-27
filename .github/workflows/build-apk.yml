@@ -1,0 +1,47 @@
+name: Build VDrive APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    name: Build VDrive Geely M7 APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Generate Wrapper & Grant Permissions
+        run: |
+          gradle wrapper
+          chmod +x gradlew
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Rename APK for Easy Download
+        run: |
+          mkdir -p build_output
+          cp app/build/outputs/apk/debug/app-debug.apk build_output/VDrive-Geely-M7.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VDrive-Geely-M7-APK
+          path: build_output/VDrive-Geely-M7.apk
+          retention-days: 14
