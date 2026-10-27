@@ -702,4 +702,16 @@ class GeelyFlymeHalAdapter(
             }
         }
     }
+
+    override fun updateLocation(latitude: Double, longitude: Double, speedKmh: Float, bearingDegrees: Float) {
+        _telemetryState.update { s ->
+            s.copy(
+                latitude = latitude,
+                longitude = longitude,
+                speedKmh = if (s.speedKmh == 0.0f) speedKmh else s.speedKmh,
+                headingDegrees = bearingDegrees,
+                timestampMs = System.currentTimeMillis()
+            )
+        }
+    }
 }

@@ -48,6 +48,7 @@ private const val CHARGER_ICON_ID = "kmautonav-charger-icon"
 private const val REPAIR_ICON_ID = "kmautonav-repair-icon"
 private const val LANDMARK_ICON_ID = "kmautonav-landmark-icon"
 private const val SAVED_ICON_ID = "kmautonav-saved-icon"
+private const val DESTINATION_ICON_ID = "kmautonav-destination-icon"
 
 /**
  * 100% Offline MapLibre Engine Component for Cambodia.
@@ -66,6 +67,8 @@ fun CambodiaOfflineMapView(
     vehicleSpeedKmh: Float = 0f,
     places: List<PlaceEntity> = emptyList(),
     navigationState: ActiveNavigationState = ActiveNavigationState(),
+    selectedPlace: PlaceEntity? = null,
+    recenterTrigger: Int = 0,
     onPlaceSelected: ((PlaceEntity) -> Unit)? = null,
     bottomDockPaddingDp: Int = 120, // Automotive Dock Inset: Prevents vehicle cursor from hiding behind Flyme Auto / Climate dock
     leftNavRailPaddingDp: Int = 0,
@@ -83,6 +86,7 @@ fun CambodiaOfflineMapView(
     var mapLibreMapInstance by remember { mutableStateOf<MapLibreMap?>(null) }
     var symbolManagerInstance by remember { mutableStateOf<SymbolManager?>(null) }
     var vehicleSymbolInstance by remember { mutableStateOf<Symbol?>(null) }
+    var destinationSymbolInstance by remember { mutableStateOf<Symbol?>(null) }
     var mapViewInstance by remember { mutableStateOf<MapView?>(null) }
     val placesMap = remember { mutableMapOf<String, PlaceEntity>() }
 
@@ -104,7 +108,7 @@ fun CambodiaOfflineMapView(
         }
     }
 
-    // Camera follow vehicle position
+    // Camera follow vehicle position during driving
     LaunchedEffect(vehicleLat, vehicleLng, vehicleHeading) {
         val map = mapLibreMapInstance ?: return@LaunchedEffect
         val target = LatLng(vehicleLat, vehicleLng)
@@ -121,6 +125,29 @@ fun CambodiaOfflineMapView(
             .build()
 
         map.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition), 300)
+    }
+
+    // Recenter / My Location Trigger
+    LaunchedEffect(recenterTrigger) {
+        if (recenterTrigger > 0) {
+            val map = mapLibreMapInstance ?: return@LaunchedEffect
+            val target = LatLng(vehicleLat, vehicleLng)
+            val cameraPosition = CameraPosition.Builder()
+                .target(target)
+                .zoom(16.5)
+                .tilt(40.0)
+                .bearing(vehicleHeading.toDouble())
+                .build()
+            map.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition), 600)
+        }
+    }
+
+    // Camera fly-to when a search place or POI is selected
+    LaunchedEffect(selectedPlace) {
+        val place = selectedPlace ?: return@LaunchedEffect
+        val map = mapLibreMapInstance ?: return@LaunchedEffect
+        val target = LatLng(place.latitude, place.longitude)
+        map.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 16.0), 800)
     }
 
     // Update Dedicated Oriented Vehicle Puck
@@ -141,11 +168,48 @@ fun CambodiaOfflineMapView(
         }
     }
 
-    // Update Route Line Layer
-    LaunchedEffect(navigationState.routePolyline) {
+    // Update Route Line & Fit Entire Route into View when Navigation Starts
+    LaunchedEffect(navigationState.isNavigating, navigationState.routePolyline) {
         val map = mapLibreMapInstance ?: return@LaunchedEffect
-        val style = map.style ?: return@LaunchedEffect
-        updateRouteOnMap(style, navigationState.routePolyline)
+        val style = map.style
+        if (style != null) {
+            updateRouteOnMap(style, navigationState.routePolyline)
+        }
+
+        if (navigationState.isNavigating && navigationState.routePolyline.size >= 2) {
+            val builder = org.maplibre.android.geometry.LatLngBounds.Builder()
+            navigationState.routePolyline.forEach { pt ->
+                builder.include(LatLng(pt.first, pt.second))
+            }
+            try {
+                val bounds = builder.build()
+                map.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 150), 1000)
+            } catch (e: Exception) {
+                Log.w(TAG, "Bounds animation note: ${e.message}")
+            }
+        }
+    }
+
+    // Update Destination Flag / Pin Marker
+    LaunchedEffect(navigationState.destination, navigationState.isNavigating, symbolManagerInstance) {
+        val sm = symbolManagerInstance ?: return@LaunchedEffect
+        val dest = navigationState.destination
+        destinationSymbolInstance?.let { runCatching { sm.delete(it) } }
+        destinationSymbolInstance = null
+
+        if (dest != null && navigationState.isNavigating) {
+            val destOptions = SymbolOptions()
+                .withLatLng(LatLng(dest.latitude, dest.longitude))
+                .withIconImage(DESTINATION_ICON_ID)
+                .withIconSize(1.3f)
+                .withTextField(dest.nameKm)
+                .withTextSize(12f)
+                .withTextOffset(arrayOf(0f, 2.0f))
+                .withTextColor("#FF5252")
+                .withTextHaloColor("#FFFFFF")
+                .withTextHaloWidth(2.5f)
+            destinationSymbolInstance = sm.create(destOptions)
+        }
     }
 
     // Update Places & EV Charger Symbols
@@ -217,6 +281,27 @@ fun CambodiaOfflineMapView(
                             }
                             symbolManagerInstance = symbolManager
 
+                            // Register Map Click to allow routing to any tapped location
+                            map.addOnMapClickListener { latLng ->
+                                val tappedPlace = PlaceEntity(
+                                    nameKm = "ទីតាំងជ្រើសរើស (Custom Destination)",
+                                    nameEn = "Custom Destination",
+                                    category = PlaceCategory.SAVED_WORK,
+                                    latitude = latLng.latitude,
+                                    longitude = latLng.longitude,
+                                    addressKm = String.format("%.4f°N, %.4f°E", latLng.latitude, latLng.longitude),
+                                    addressEn = String.format("%.4f°N, %.4f°E", latLng.latitude, latLng.longitude),
+                                    city = "Cambodia"
+                                )
+                                onPlaceSelected?.invoke(tappedPlace)
+                                true
+                            }
+
+                            // If route already active, draw immediately
+                            if (navigationState.routePolyline.isNotEmpty()) {
+                                updateRouteOnMap(style, navigationState.routePolyline)
+                            }
+
                             // Initial camera centered on Phnom Penh with dock clearance
                             map.cameraPosition = CameraPosition.Builder()
                                 .target(LatLng(vehicleLat, vehicleLng))
@@ -240,6 +325,7 @@ fun CambodiaOfflineMapView(
                         map.setStyle(Style.Builder().fromUri(styleUri)) { style ->
                             registerMapIcons(context, style)
                             vehicleSymbolInstance = null
+                            destinationSymbolInstance = null
                             symbolManagerInstance = SymbolManager(mapView, map, style)
                             updateRouteOnMap(style, navigationState.routePolyline)
                         }
@@ -278,35 +364,50 @@ fun CambodiaOfflineMapView(
 }
 
 private fun updateRouteOnMap(style: Style, routePoints: List<Pair<Double, Double>>) {
-    if (!style.isFullyLoaded) return
     try {
         val coordinates = routePoints.map { Point.fromLngLat(it.second, it.first) }
         val feature = if (coordinates.size >= 2) {
             Feature.fromGeometry(LineString.fromLngLats(coordinates))
+        } else {
+            null
+        }
+
+        val featureCollection = if (feature != null) {
+            FeatureCollection.fromFeature(feature)
         } else {
             FeatureCollection.fromFeatures(emptyList())
         }
 
         var source = style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE_ID)
         if (source == null) {
-            source = if (feature is Feature) GeoJsonSource(ROUTE_SOURCE_ID, feature)
-            else GeoJsonSource(ROUTE_SOURCE_ID)
+            source = GeoJsonSource(ROUTE_SOURCE_ID, featureCollection)
             style.addSource(source)
 
+            // Casing layer for high visibility contrast
+            val casingLayer = LineLayer(ROUTE_LAYER_ID + "-casing", ROUTE_SOURCE_ID).apply {
+                setProperties(
+                    lineColor("#0B111E"),
+                    lineWidth(9.5f),
+                    lineCap("round"),
+                    lineJoin("round"),
+                    lineOpacity(0.85f)
+                )
+            }
+            style.addLayer(casingLayer)
+
+            // Primary route line
             val lineLayer = LineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID).apply {
                 setProperties(
                     lineColor("#00E5FF"), // Geely Cyan
                     lineWidth(6.5f),
                     lineCap("round"),
                     lineJoin("round"),
-                    lineOpacity(0.92f)
+                    lineOpacity(0.95f)
                 )
             }
             style.addLayer(lineLayer)
         } else {
-            if (feature is Feature) {
-                source.setGeoJson(feature)
-            }
+            source.setGeoJson(featureCollection)
         }
     } catch (e: Exception) {
         Log.w(TAG, "updateRouteOnMap note: ${e.message}")
@@ -427,6 +528,37 @@ private fun registerMapIcons(context: Context, mapStyle: Style) {
         canvas.drawCircle(24f, 24f, 6f, centerPaint)
     }
     mapStyle.addImage(SAVED_ICON_ID, savedBitmap)
+
+    // 6. Destination Pin Icon (Red Pin with White Target Dot)
+    val destBitmap = Bitmap.createBitmap(52, 52, Bitmap.Config.ARGB_8888).apply {
+        val canvas = Canvas(this)
+        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.parseColor("#FF5252") // Coral Red
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(26f, 20f, 16f, bgPaint)
+        val path = Path().apply {
+            moveTo(14f, 24f)
+            lineTo(38f, 24f)
+            lineTo(26f, 48f)
+            close()
+        }
+        canvas.drawPath(path, bgPaint)
+
+        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = 2.5f
+        }
+        canvas.drawCircle(26f, 20f, 16f, borderPaint)
+
+        val centerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(26f, 20f, 6f, centerPaint)
+    }
+    mapStyle.addImage(DESTINATION_ICON_ID, destBitmap)
 }
 
 private fun resolveOfflineMbtilesStyle(context: Context, isDaytime: Boolean, mbtilesFile: File): String {

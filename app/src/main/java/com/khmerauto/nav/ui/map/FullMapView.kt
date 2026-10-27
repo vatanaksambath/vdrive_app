@@ -70,10 +70,11 @@ fun FullMapView(
     var selectedCategoryFilter by remember { mutableStateOf("ALL") }
     var selectedPlace by remember { mutableStateOf<PlaceEntity?>(null) }
     var showAddChargerDialog by remember { mutableStateOf(false) }
+    var recenterTrigger by remember { mutableIntStateOf(0) }
 
     // Load initial places
     LaunchedEffect(Unit) {
-        allPlaces = placeRepository.getAllEvChargers()
+        allPlaces = placeRepository.getAllPlaces()
     }
 
     // Reactive POI search with sub-30ms response
@@ -106,6 +107,8 @@ fun FullMapView(
             vehicleSpeedKmh = telemetry.speedKmh,
             places = filteredPlaces,
             navigationState = navState,
+            selectedPlace = selectedPlace,
+            recenterTrigger = recenterTrigger,
             onPlaceSelected = { place ->
                 selectedPlace = place
             },
@@ -206,14 +209,24 @@ fun FullMapView(
                     CategoryFilterChip(
                         label = "ទាំងអស់ (All Places)",
                         isSelected = selectedCategoryFilter == "ALL",
-                        onClick = { selectedCategoryFilter = "ALL" }
+                        onClick = {
+                            selectedCategoryFilter = "ALL"
+                            coroutineScope.launch {
+                                allPlaces = placeRepository.getAllPlaces()
+                            }
+                        }
                     )
                 }
                 item {
                     CategoryFilterChip(
                         label = "⚡ 120kW+ Fast Chargers",
                         isSelected = selectedCategoryFilter == "EV_FAST",
-                        onClick = { selectedCategoryFilter = "EV_FAST" }
+                        onClick = {
+                            selectedCategoryFilter = "EV_FAST"
+                            coroutineScope.launch {
+                                allPlaces = placeRepository.getAllEvChargers()
+                            }
+                        }
                     )
                 }
                 item {
@@ -232,7 +245,15 @@ fun FullMapView(
                     CategoryFilterChip(
                         label = "⭐ ទីតាំងរក្សាទុក (Favorites)",
                         isSelected = selectedCategoryFilter == "FAVORITES",
-                        onClick = { selectedCategoryFilter = "FAVORITES" }
+                        onClick = {
+                            selectedCategoryFilter = "FAVORITES"
+                            coroutineScope.launch {
+                                val favs = placeRepository.getPlacesByCategory(PlaceCategory.FAVORITE)
+                                val homes = placeRepository.getPlacesByCategory(PlaceCategory.SAVED_HOME)
+                                val works = placeRepository.getPlacesByCategory(PlaceCategory.SAVED_WORK)
+                                allPlaces = favs + homes + works
+                            }
+                        }
                     )
                 }
             }
@@ -333,6 +354,17 @@ fun FullMapView(
                 .padding(end = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // My Location / GPS Recenter FAB
+            FloatingActionButton(
+                onClick = { recenterTrigger++ },
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = GeelyAccentCyan,
+                shape = CircleShape,
+                modifier = Modifier.size(52.dp)
+            ) {
+                Icon(Icons.Default.MyLocation, contentDescription = "My Location")
+            }
+
             // Add Charger FAB
             FloatingActionButton(
                 onClick = { showAddChargerDialog = true },

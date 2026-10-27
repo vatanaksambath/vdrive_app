@@ -31,7 +31,16 @@ class MainActivity : ComponentActivity() {
     private val requestPermissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        // Permissions callback
+        val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (fineGranted || coarseGranted) {
+            (application as? KMAutoNavApp)?.locationProvider?.startListening()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        (application as? KMAutoNavApp)?.locationProvider?.startListening()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

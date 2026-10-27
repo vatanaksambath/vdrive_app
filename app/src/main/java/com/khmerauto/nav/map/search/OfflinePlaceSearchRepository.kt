@@ -124,6 +124,10 @@ class OfflinePlaceSearchRepository(
         finalResults
     }
 
+    suspend fun getAllPlaces(): List<PlaceEntity> = withContext(Dispatchers.IO) {
+        placeDao.getAllPlaces()
+    }
+
     suspend fun getAllEvChargers(): List<PlaceEntity> = withContext(Dispatchers.IO) {
         placeDao.getAllEvChargers()
     }

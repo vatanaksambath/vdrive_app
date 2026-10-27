@@ -192,58 +192,120 @@ class NavigationRouteEngine {
         val points = mutableListOf<Pair<Double, Double>>()
         points.add(startLat to startLng)
 
-        // Interpolate along city grid
-        val midLat = startLat + (endLat - startLat) * 0.45
-        val midLng = startLng + (endLng - startLng) * 0.35
-        val midLat2 = startLat + (endLat - startLat) * 0.75
-        val midLng2 = startLng + (endLng - startLng) * 0.80
+        val totalDistKm = calculateHaversineDistanceKm(startLat, startLng, endLat, endLng)
 
-        points.add(midLat to startLng)
-        points.add(midLat to midLng)
-        points.add(midLat2 to midLng2)
+        if (totalDistKm > 30.0f) {
+            // Provincial route: interpolate 16 points with realistic road curvature
+            val segments = 16
+            for (i in 1 until segments) {
+                val frac = i.toDouble() / segments
+                val curve = kotlin.math.sin(frac * Math.PI) * 0.015
+                val lat = startLat + (endLat - startLat) * frac + curve
+                val lng = startLng + (endLng - startLng) * frac - curve * 0.5
+                points.add(lat to lng)
+            }
+        } else {
+            // Urban route: grid-aligned turns across city arterial corridors
+            val midLat1 = startLat + (endLat - startLat) * 0.25
+            val midLng1 = startLng + (endLng - startLng) * 0.10
+            val midLat2 = startLat + (endLat - startLat) * 0.55
+            val midLng2 = startLng + (endLng - startLng) * 0.50
+            val midLat3 = startLat + (endLat - startLat) * 0.85
+            val midLng3 = startLng + (endLng - startLng) * 0.85
+
+            points.add(midLat1 to startLng)
+            points.add(midLat1 to midLng1)
+            points.add(midLat2 to midLng1)
+            points.add(midLat2 to midLng2)
+            points.add(midLat3 to midLng2)
+            points.add(midLat3 to midLng3)
+        }
+
         points.add(endLat to endLng)
         return points
     }
 
     private fun generateManeuverSteps(polyline: List<Pair<Double, Double>>, dest: PlaceEntity): MutableList<RouteManeuverStep> {
         val steps = mutableListOf<RouteManeuverStep>()
+        val totalDistanceKm = if (polyline.size >= 2) {
+            calculateHaversineDistanceKm(polyline.first().first, polyline.first().second, dest.latitude, dest.longitude)
+        } else 5.0f
 
-        steps.add(
-            RouteManeuverStep(
-                maneuverType = ManeuverType.STRAIGHT,
-                instructionKm = "បន្តដំណើរទៅមុខតាម មហាវិថី ព្រះនរោត្តម",
-                instructionEn = "Continue straight on Preah Norodom Blvd",
-                roadNameKm = "មហាវិថី ព្រះនរោត្តម",
-                roadNameEn = "Preah Norodom Blvd",
-                distanceMeters = 650,
-                latitude = polyline.getOrNull(0)?.first ?: 11.5564,
-                longitude = polyline.getOrNull(0)?.second ?: 104.9282
+        if (totalDistanceKm > 40.0f) {
+            steps.add(
+                RouteManeuverStep(
+                    maneuverType = ManeuverType.STRAIGHT,
+                    instructionKm = "ធ្វើដំណើរបន្តទៅមុខលើ ផ្លូវជាតិ ឬ ផ្លូវល្បឿនលឿន",
+                    instructionEn = "Continue straight on National Expressway / Highway",
+                    roadNameKm = "ផ្លូវល្បឿនលឿន / ផ្លូវជាតិ",
+                    roadNameEn = "Expressway / National Highway",
+                    distanceMeters = 1500,
+                    latitude = polyline.getOrNull(0)?.first ?: 11.5564,
+                    longitude = polyline.getOrNull(0)?.second ?: 104.9282
+                )
             )
-        )
-        steps.add(
-            RouteManeuverStep(
-                maneuverType = ManeuverType.TURN_RIGHT,
-                instructionKm = "បត់ស្តាំចូល មហាវិថី សហព័ន្ធរុស្ស៊ី",
-                instructionEn = "Turn right onto Russian Federation Blvd",
-                roadNameKm = "មហាវិថី សហព័ន្ធរុស្ស៊ី",
-                roadNameEn = "Russian Federation Blvd",
-                distanceMeters = 1200,
-                latitude = polyline.getOrNull(1)?.first ?: 11.5600,
-                longitude = polyline.getOrNull(1)?.second ?: 104.9100
+            steps.add(
+                RouteManeuverStep(
+                    maneuverType = ManeuverType.SLIGHT_RIGHT,
+                    instructionKm = "បត់ស្តាំឆ្ពោះទៅច្រកចេញ ${dest.city}",
+                    instructionEn = "Keep right towards ${dest.city} exit",
+                    roadNameKm = "ផ្លូវឆ្ពោះទៅ ${dest.city}",
+                    roadNameEn = "Exit towards ${dest.city}",
+                    distanceMeters = (totalDistanceKm * 800).toInt(),
+                    latitude = polyline.getOrNull(polyline.size / 2)?.first ?: 11.5600,
+                    longitude = polyline.getOrNull(polyline.size / 2)?.second ?: 104.9100
+                )
             )
-        )
-        steps.add(
-            RouteManeuverStep(
-                maneuverType = ManeuverType.TURN_LEFT,
-                instructionKm = "បត់ឆ្វេងឆ្ពោះទៅកាន់ ${dest.nameKm}",
-                instructionEn = "Turn left towards ${dest.nameEn}",
-                roadNameKm = dest.nameKm,
-                roadNameEn = dest.nameEn,
-                distanceMeters = 400,
-                latitude = polyline.last().first,
-                longitude = polyline.last().second
+            steps.add(
+                RouteManeuverStep(
+                    maneuverType = ManeuverType.ARRIVED,
+                    instructionKm = "អ្នកនឹងមកដល់ ${dest.nameKm}",
+                    instructionEn = "Arrive at ${dest.nameEn}",
+                    roadNameKm = dest.nameKm,
+                    roadNameEn = dest.nameEn,
+                    distanceMeters = 500,
+                    latitude = dest.latitude,
+                    longitude = dest.longitude
+                )
             )
-        )
+        } else {
+            steps.add(
+                RouteManeuverStep(
+                    maneuverType = ManeuverType.STRAIGHT,
+                    instructionKm = "បន្តដំណើរទៅមុខតាមផ្លូវធំ",
+                    instructionEn = "Continue straight on main road",
+                    roadNameKm = "មហាវិថី ព្រះនរោត្តម",
+                    roadNameEn = "Preah Norodom Blvd",
+                    distanceMeters = 650,
+                    latitude = polyline.getOrNull(0)?.first ?: 11.5564,
+                    longitude = polyline.getOrNull(0)?.second ?: 104.9282
+                )
+            )
+            steps.add(
+                RouteManeuverStep(
+                    maneuverType = ManeuverType.TURN_RIGHT,
+                    instructionKm = "បត់ស្តាំនៅផ្លូវកែងបន្ទាប់",
+                    instructionEn = "Turn right at the next intersection",
+                    roadNameKm = "មហាវិថី សហព័ន្ធរុស្ស៊ី",
+                    roadNameEn = "Russian Federation Blvd",
+                    distanceMeters = 850,
+                    latitude = polyline.getOrNull(polyline.size / 2)?.first ?: 11.5600,
+                    longitude = polyline.getOrNull(polyline.size / 2)?.second ?: 104.9100
+                )
+            )
+            steps.add(
+                RouteManeuverStep(
+                    maneuverType = ManeuverType.TURN_LEFT,
+                    instructionKm = "បត់ឆ្វេងឆ្ពោះទៅកាន់ ${dest.nameKm}",
+                    instructionEn = "Turn left towards ${dest.nameEn}",
+                    roadNameKm = dest.nameKm,
+                    roadNameEn = dest.nameEn,
+                    distanceMeters = 350,
+                    latitude = dest.latitude,
+                    longitude = dest.longitude
+                )
+            )
+        }
         return steps
     }
 

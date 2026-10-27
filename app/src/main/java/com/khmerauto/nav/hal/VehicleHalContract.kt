@@ -89,6 +89,11 @@ interface VehicleHalContract {
     suspend fun executeRawProperty(propId: Int, areaId: Int, value: Any): Result<Unit>
 
     /**
+     * Updates GPS latitude, longitude, speed and heading from hardware GPS or mock provider.
+     */
+    fun updateLocation(latitude: Double, longitude: Double, speedKmh: Float, bearingDegrees: Float) {}
+
+    /**
      * Lifecycle start: begins polling, listeners, or WebSocket connection.
      */
     fun start()

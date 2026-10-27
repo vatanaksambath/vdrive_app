@@ -60,6 +60,9 @@ class KMAutoNavApp : Application() {
     lateinit var gapEngine: GapReconciliationEngine
         private set
 
+    lateinit var locationProvider: com.khmerauto.nav.core.location.VehicleLocationProvider
+        private set
+
     val snifferEngine = VhalSnifferEngine()
 
     private val _runtimeMode = MutableStateFlow(RuntimeMode.SIMULATOR)
@@ -82,6 +85,12 @@ class KMAutoNavApp : Application() {
         placeRepository = OfflinePlaceSearchRepository(database)
         routeEngine = NavigationRouteEngine()
         hudManager = SecondaryClusterHudManager(this, routeEngine).apply { start() }
+
+        // Initialize GPS & Network Location Provider
+        locationProvider = com.khmerauto.nav.core.location.VehicleLocationProvider(this) { lat, lng, speed, bearing ->
+            activeHal?.updateLocation(lat, lng, speed, bearing)
+        }
+        locationProvider.startListening()
 
         // Initialize Phase 5 "Two Numbers Moved Without You" Gap Reconciliation Engine
         gapEngine = GapReconciliationEngine(database)
@@ -164,6 +173,7 @@ class KMAutoNavApp : Application() {
         ).apply {
             onReleaseMicrophone = {
                 voiceService.stopListeningAndRelease()
+                locationProvider.stopListening()
             }
             onPauseMapRendering = {
                 hudManager.stop()
@@ -174,10 +184,12 @@ class KMAutoNavApp : Application() {
             }
             onUnregisterSensors = {
                 (activeHal as? GeelyFlymeHalAdapter)?.unregisterSensors()
+                locationProvider.stopListening()
             }
             onResumeSubsystems = {
                 hudManager.start()
                 voiceService.startListening()
+                locationProvider.startListening()
                 if (_runtimeMode.value == RuntimeMode.CAR_NATIVE_HOST) {
                     setRuntimeMode(RuntimeMode.CAR_NATIVE_HOST)
                 }
@@ -209,6 +221,7 @@ class KMAutoNavApp : Application() {
     }
 
     override fun onTerminate() {
+        locationProvider.stopListening()
         hudManager.stop()
         powerLifecycleObserver.unregister()
         super.onTerminate()
@@ -265,13 +278,27 @@ class KMAutoNavApp : Application() {
         progressTrackerJob?.cancel()
         val hal = activeHal ?: return
         progressTrackerJob = applicationScope.launch {
-            hal.telemetryState.collect { telemetry ->
-                routeEngine.updateVehicleProgress(
-                    currentLat = telemetry.latitude,
-                    currentLng = telemetry.longitude,
-                    currentSpeed = telemetry.speedKmh,
-                    batteryPercent = telemetry.batteryPercent
-                )
+            launch {
+                hal.telemetryState.collect { telemetry ->
+                    routeEngine.updateVehicleProgress(
+                        currentLat = telemetry.latitude,
+                        currentLng = telemetry.longitude,
+                        currentSpeed = telemetry.speedKmh,
+                        batteryPercent = telemetry.batteryPercent
+                    )
+                }
+            }
+            launch {
+                routeEngine.navState.collect { nav ->
+                    val sim = activeHal as? SimulatedHalAdapter
+                    if (sim != null) {
+                        if (nav.isNavigating && nav.routePolyline.isNotEmpty()) {
+                            sim.setActiveNavigationRoute(nav.routePolyline)
+                        } else if (!nav.isNavigating) {
+                            sim.clearActiveNavigationRoute()
+                        }
+                    }
+                }
             }
         }
     }

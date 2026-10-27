@@ -86,6 +86,36 @@ class SimulatedHalAdapter : VehicleHalContract {
     // Sniffer event listener
     var snifferEventListener: ((propId: Int, areaId: Int, value: Any, source: String) -> Unit)? = null
 
+    // Navigation and GPS state
+    private var hasRealGpsFix = false
+    private var activeRoutePoints = listOf<Pair<Double, Double>>()
+    private var activeRouteIndex = 0
+
+    fun setActiveNavigationRoute(route: List<Pair<Double, Double>>) {
+        Log.i(TAG, "SimulatedHalAdapter: Routing towards destination with ${route.size} waypoints")
+        activeRoutePoints = route
+        activeRouteIndex = 0
+    }
+
+    fun clearActiveNavigationRoute() {
+        Log.i(TAG, "SimulatedHalAdapter: Cleared navigation route")
+        activeRoutePoints = emptyList()
+        activeRouteIndex = 0
+    }
+
+    override fun updateLocation(latitude: Double, longitude: Double, speedKmh: Float, bearingDegrees: Float) {
+        hasRealGpsFix = true
+        _telemetryState.update { s ->
+            s.copy(
+                latitude = latitude,
+                longitude = longitude,
+                speedKmh = speedKmh,
+                headingDegrees = bearingDegrees,
+                timestampMs = System.currentTimeMillis()
+            )
+        }
+    }
+
     override fun start() {
         if (isSimulating) return
         isSimulating = true
@@ -127,36 +157,66 @@ class SimulatedHalAdapter : VehicleHalContract {
             val distanceKm = speed * dtHours
             val newOdometer = current.odometerKm + distanceKm
 
-            val loopProgress = ((newOdometer * 2.0f) % 10.0f).toDouble()
-            val heading: Float
-            val latDelta: Double
-            val lngDelta: Double
+            var heading: Float = current.headingDegrees
+            var newLat: Double = current.latitude
+            var newLng: Double = current.longitude
 
-            when {
-                loopProgress < 3.0 -> { // Northbound on Preah Norodom Blvd
-                    heading = 355f
-                    latDelta = (distanceKm / 111.0)
-                    lngDelta = 0.0
+            if (hasRealGpsFix) {
+                // Keep real hardware GPS fixes
+                heading = current.headingDegrees
+                newLat = current.latitude
+                newLng = current.longitude
+            } else if (activeRoutePoints.isNotEmpty() && activeRouteIndex < activeRoutePoints.size) {
+                // Navigate actively along planned route towards destination
+                val targetPoint = activeRoutePoints[activeRouteIndex]
+                val dLat = targetPoint.first - current.latitude
+                val dLng = targetPoint.second - current.longitude
+                val distM = kotlin.math.sqrt(dLat * dLat + dLng * dLng) * 111000.0
+
+                if (distM < 25.0 && activeRouteIndex < activeRoutePoints.size - 1) {
+                    activeRouteIndex++
                 }
-                loopProgress < 6.0 -> { // Westbound on Russian Federation Blvd
-                    heading = 270f
-                    latDelta = 0.0
-                    lngDelta = -(distanceKm / (111.0 * kotlin.math.cos(Math.toRadians(current.latitude))))
+
+                val angleRad = kotlin.math.atan2(dLng * kotlin.math.cos(Math.toRadians(current.latitude)), dLat)
+                heading = ((Math.toDegrees(angleRad) + 360.0) % 360.0).toFloat()
+
+                val stepDistKm = speed * dtHours
+                val stepFraction = if (distM > 0.0) (stepDistKm * 1000.0 / distM).coerceIn(0.0, 1.0) else 1.0
+
+                newLat = current.latitude + dLat * stepFraction
+                newLng = current.longitude + dLng * stepFraction
+            } else {
+                // Default urban traffic cruising loop in Phnom Penh
+                val loopProgress = ((newOdometer * 2.0f) % 10.0f).toDouble()
+                val latDelta: Double
+                val lngDelta: Double
+
+                when {
+                    loopProgress < 3.0 -> { // Northbound on Preah Norodom Blvd
+                        heading = 355f
+                        latDelta = (distanceKm / 111.0)
+                        lngDelta = 0.0
+                    }
+                    loopProgress < 6.0 -> { // Westbound on Russian Federation Blvd
+                        heading = 270f
+                        latDelta = 0.0
+                        lngDelta = -(distanceKm / (111.0 * kotlin.math.cos(Math.toRadians(current.latitude))))
+                    }
+                    loopProgress < 8.0 -> { // Southbound on Street 271
+                        heading = 175f
+                        latDelta = -(distanceKm / 111.0)
+                        lngDelta = 0.0
+                    }
+                    else -> { // Eastbound on Mao Tse Toung Blvd back to Norodom
+                        heading = 85f
+                        latDelta = 0.0
+                        lngDelta = (distanceKm / (111.0 * kotlin.math.cos(Math.toRadians(current.latitude))))
+                    }
                 }
-                loopProgress < 8.0 -> { // Southbound on Street 271
-                    heading = 175f
-                    latDelta = -(distanceKm / 111.0)
-                    lngDelta = 0.0
-                }
-                else -> { // Eastbound on Mao Tse Toung Blvd back to Norodom
-                    heading = 85f
-                    latDelta = 0.0
-                    lngDelta = (distanceKm / (111.0 * kotlin.math.cos(Math.toRadians(current.latitude))))
-                }
+
+                newLat = (current.latitude + latDelta).coerceIn(11.5000, 11.6000)
+                newLng = (current.longitude + lngDelta).coerceIn(104.8500, 104.9500)
             }
-
-            val newLat = (current.latitude + latDelta).coerceIn(11.5000, 11.6000)
-            val newLng = (current.longitude + lngDelta).coerceIn(104.8500, 104.9500)
 
             // 3. Battery Discharge Dynamics
             // Base consumption: HVAC draw (1.2 kW) + driving traction draw
