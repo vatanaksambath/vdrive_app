@@ -20,21 +20,19 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Setup Gradle
+      - name: Setup Gradle 8.7
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
 
-      - name: Generate Wrapper & Grant Permissions
+      - name: Accept Android SDK Licenses
         run: |
-          gradle wrapper
-          chmod +x gradlew
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Rename APK for Easy Download
+      - name: Prepare APK Output
         run: |
           mkdir -p build_output
           cp app/build/outputs/apk/debug/app-debug.apk build_output/VDrive-Geely-M7.apk
