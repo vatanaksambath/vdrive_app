@@ -53,7 +53,7 @@ class MainActivity : ComponentActivity() {
                     Surface(
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        var currentScreen by remember { mutableStateOf("cockpit") }
+                        var currentScreen by remember { mutableStateOf("splash") }
                         val runtimeMode by app.runtimeMode.collectAsState()
                         val gapSummary by app.gapEngine.reconciliationSummary.collectAsState()
 
@@ -61,11 +61,19 @@ class MainActivity : ComponentActivity() {
                             AnimatedContent(
                                 targetState = currentScreen,
                                 transitionSpec = {
-                                    fadeIn() togetherWith fadeOut()
+                                    if (initialState == "splash") {
+                                        (fadeIn(animationSpec = tween(600)) + scaleIn(initialScale = 0.96f))
+                                            .togetherWith(fadeOut(animationSpec = tween(400)))
+                                    } else {
+                                        fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300))
+                                    }
                                 },
                                 label = "screenTransition"
                             ) { screen ->
                                 when (screen) {
+                                    "splash" -> com.khmerauto.nav.ui.splash.SplashScreen(
+                                        onSplashComplete = { currentScreen = "cockpit" }
+                                    )
                                     "cockpit" -> CockpitScreen(
                                         currentHal = app.currentHal,
                                         gapSummary = gapSummary,

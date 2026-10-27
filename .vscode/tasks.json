@@ -1,0 +1,41 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build VDrive Debug APK",
+      "type": "shell",
+      "command": ".\\gradlew.bat assembleDebug",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$gradle"]
+    },
+    {
+      "label": "Install on Device/Emulator",
+      "type": "shell",
+      "command": ".\\gradlew.bat installDebug",
+      "problemMatcher": ["$gradle"]
+    },
+    {
+      "label": "Launch VDrive on Car/Tablet",
+      "type": "shell",
+      "command": "adb shell am start -n com.khmerauto.nav/.MainActivity",
+      "dependsOn": ["Install on Device/Emulator"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Stream Live Automotive Logs (Logcat)",
+      "type": "shell",
+      "command": "adb logcat -v time -s VDrive:V KMAutoNavApp:I VehicleHal:I GapReconciliation:I CarPowerObserver:I",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Connect to Geely Car Hotspot via ADB",
+      "type": "shell",
+      "command": "adb connect 192.168.43.1:5555",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -67,6 +67,8 @@ fun CambodiaOfflineMapView(
     places: List<PlaceEntity> = emptyList(),
     navigationState: ActiveNavigationState = ActiveNavigationState(),
     onPlaceSelected: ((PlaceEntity) -> Unit)? = null,
+    bottomDockPaddingDp: Int = 120, // Automotive Dock Inset: Prevents vehicle cursor from hiding behind Flyme Auto / Climate dock
+    leftNavRailPaddingDp: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -194,6 +196,12 @@ fun CambodiaOfflineMapView(
                     getMapAsync { map ->
                         mapLibreMapInstance = map
 
+                        // Automotive Camera Inset: Shifts camera focal center up so cursor is never hidden behind the Flyme Auto dock
+                        val density = ctx.resources.displayMetrics.density
+                        val bPadding = (bottomDockPaddingDp * density).toInt()
+                        val lPadding = (leftNavRailPaddingDp * density).toInt()
+                        map.setPadding(lPadding, 0, 0, bPadding)
+
                         map.setStyle(Style.Builder().fromUri(styleUri)) { style ->
                             // Register custom bitmap icons
                             registerMapIcons(ctx, style)
@@ -212,7 +220,7 @@ fun CambodiaOfflineMapView(
                             }
                             symbolManagerInstance = symbolManager
 
-                            // Initial camera centered on Phnom Penh
+                            // Initial camera centered on Phnom Penh with dock clearance
                             map.cameraPosition = CameraPosition.Builder()
                                 .target(LatLng(vehicleLat, vehicleLng))
                                 .zoom(15.0)
@@ -223,8 +231,14 @@ fun CambodiaOfflineMapView(
                 }
             },
             update = { mapView ->
-                // Reload style if Day/Night mode changed
                 mapLibreMapInstance?.let { map ->
+                    // Continuously update camera dock insets
+                    val density = context.resources.displayMetrics.density
+                    val bPadding = (bottomDockPaddingDp * density).toInt()
+                    val lPadding = (leftNavRailPaddingDp * density).toInt()
+                    map.setPadding(lPadding, 0, 0, bPadding)
+
+                    // Reload style if Day/Night mode changed
                     if (map.style?.uri != styleUri) {
                         map.setStyle(Style.Builder().fromUri(styleUri)) { style ->
                             registerMapIcons(context, style)

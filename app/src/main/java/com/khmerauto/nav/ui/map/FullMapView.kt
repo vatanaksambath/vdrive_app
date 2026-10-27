@@ -96,6 +96,8 @@ fun FullMapView(
     }
 
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        val dynamicBottomPadding = if (selectedPlace != null) 210 else 120
+
         // 1. MapLibre Offline Vector/Raster Engine
         CambodiaOfflineMapView(
             vehicleLat = telemetry.latitude,
@@ -107,6 +109,7 @@ fun FullMapView(
             onPlaceSelected = { place ->
                 selectedPlace = place
             },
+            bottomDockPaddingDp = dynamicBottomPadding,
             modifier = Modifier.fillMaxSize()
         )
 
