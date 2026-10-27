@@ -32,7 +32,7 @@ object LanguageManager {
     }
 }
 
-val LocalAppStrings = compositionLocalOf { AppStrings.Khmer }
+val LocalAppStrings = compositionLocalOf<AppStrings> { AppStrings.Khmer }
 
 sealed class AppStrings(
     val appTitle: String,

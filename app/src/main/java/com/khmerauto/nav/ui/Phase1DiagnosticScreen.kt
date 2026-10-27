@@ -296,6 +296,7 @@ fun CabinControlsTab(
     telemetry: VehicleTelemetryState,
     hal: VehicleHalContract
 ) {
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
     LazyColumn(

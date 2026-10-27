@@ -85,7 +85,7 @@ fun ClusterHudContent(
                     ManeuverType.TURN_RIGHT -> Icons.Default.TurnRight
                     ManeuverType.SLIGHT_LEFT -> Icons.Default.TurnSlightLeft
                     ManeuverType.SLIGHT_RIGHT -> Icons.Default.TurnSlightRight
-                    ManeuverType.U_TURN -> Icons.Default.UturnLeft
+                    ManeuverType.U_TURN -> Icons.Default.RotateLeft
                     ManeuverType.ROUNDABOUT -> Icons.Default.RotateRight
                     ManeuverType.ARRIVED -> Icons.Default.Place
                     else -> Icons.Default.Straight

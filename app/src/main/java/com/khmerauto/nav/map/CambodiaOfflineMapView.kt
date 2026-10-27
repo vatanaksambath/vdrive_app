@@ -133,7 +133,6 @@ fun CambodiaOfflineMapView(
                 .withIconImage(VEHICLE_PUCK_ICON_ID)
                 .withIconRotate(vehicleHeading)
                 .withIconSize(1.3f)
-                .withZIndex(100)
                 .withIconIgnorePlacement(true)
                 .withIconAllowOverlap(true)
             vehicleSymbolInstance = sm.create(options)
@@ -300,8 +299,8 @@ private fun updateRouteOnMap(style: Style, routePoints: List<Pair<Double, Double
                 setProperties(
                     lineColor("#00E5FF"), // Geely Cyan
                     lineWidth(6.5f),
-                    lineCap(LINE_CAP_ROUND),
-                    lineJoin(LINE_JOIN_ROUND),
+                    lineCap("round"),
+                    lineJoin("round"),
                     lineOpacity(0.92f)
                 )
             }
@@ -316,7 +315,7 @@ private fun updateRouteOnMap(style: Style, routePoints: List<Pair<Double, Double
     }
 }
 
-private fun registerMapIcons(context: Context, style: Style) {
+private fun registerMapIcons(context: Context, mapStyle: Style) {
     // 1. Vehicle Position Puck Icon (Cyan Chevron)
     val puckBitmap = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888).apply {
         val canvas = Canvas(this)
@@ -340,7 +339,7 @@ private fun registerMapIcons(context: Context, style: Style) {
         }
         canvas.drawPath(path, borderPaint)
     }
-    style.addImage(VEHICLE_PUCK_ICON_ID, puckBitmap)
+    mapStyle.addImage(VEHICLE_PUCK_ICON_ID, puckBitmap)
 
     // 2. EV Charging Station Pin Icon (Emerald Green with Lightning Bolt)
     val chargerBitmap = Bitmap.createBitmap(52, 52, Bitmap.Config.ARGB_8888).apply {
@@ -374,7 +373,7 @@ private fun registerMapIcons(context: Context, style: Style) {
         }
         canvas.drawPath(boltPath, boltPaint)
     }
-    style.addImage(CHARGER_ICON_ID, chargerBitmap)
+    mapStyle.addImage(CHARGER_ICON_ID, chargerBitmap)
 
     // 3. EV Repair Workshop Icon (Amber Circle with Wrench)
     val repairBitmap = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888).apply {
@@ -397,7 +396,7 @@ private fun registerMapIcons(context: Context, style: Style) {
         }
         canvas.drawLine(16f, 32f, 32f, 16f, toolPaint)
     }
-    style.addImage(REPAIR_ICON_ID, repairBitmap)
+    mapStyle.addImage(REPAIR_ICON_ID, repairBitmap)
 
     // 4. Tourism Landmark Pin (Cyan Circle with Center Dot)
     val landmarkBitmap = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888).apply {
@@ -413,7 +412,7 @@ private fun registerMapIcons(context: Context, style: Style) {
         }
         canvas.drawCircle(24f, 24f, 7f, centerPaint)
     }
-    style.addImage(LANDMARK_ICON_ID, landmarkBitmap)
+    mapStyle.addImage(LANDMARK_ICON_ID, landmarkBitmap)
 
     // 5. Saved Places / Favorite (Gold Star)
     val savedBitmap = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888).apply {
@@ -429,7 +428,7 @@ private fun registerMapIcons(context: Context, style: Style) {
         }
         canvas.drawCircle(24f, 24f, 6f, centerPaint)
     }
-    style.addImage(SAVED_ICON_ID, savedBitmap)
+    mapStyle.addImage(SAVED_ICON_ID, savedBitmap)
 }
 
 private fun resolveOfflineMbtilesStyle(context: Context, isDaytime: Boolean, mbtilesFile: File): String {
