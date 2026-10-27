@@ -47,7 +47,6 @@ fun SpendingAndMaintenanceScreen(
             vehicleLng = telemetry.longitude,
             vehicleHeading = telemetry.headingDegrees,
             vehicleSpeedKmh = telemetry.speedKmh,
-            isNavigationActive = false,
             bottomDockPaddingDp = 0,
             modifier = Modifier.fillMaxSize()
         )

@@ -126,7 +126,6 @@ fun CockpitScreen(
             vehicleLng          = telemetry.longitude,
             vehicleHeading      = telemetry.headingDegrees,
             vehicleSpeedKmh     = telemetry.speedKmh,
-            isNavigationActive  = false,
             bottomDockPaddingDp = 0,
             modifier            = Modifier.fillMaxSize()
         )
@@ -1585,5 +1584,146 @@ private fun EzWorkshopCard(name: String, address: String, phone: String) {
             Text(address, fontSize = 10.sp, color = EzTxtSecondary)
             Text("Tel: $phone", fontSize = 10.sp, color = EzAccentCyan)
         }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shared Dashboard & Map Composables
+// ═══════════════════════════════════════════════════════════════════════════
+
+@Composable
+fun EzMetricCard(
+    label   : String,
+    value   : String,
+    unit    : String,
+    accent  : Color,
+    showBar : Boolean = false,
+    barFrac : Float = 0f,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(EzCardBg)
+            .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(12.dp))
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(label, fontSize = 8.sp, color = EzTxtMuted, letterSpacing = 0.8.sp)
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                text       = value,
+                fontSize   = 26.sp,
+                fontWeight = FontWeight.Black,
+                color      = EzTxtPrimary,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = (-0.5).sp
+            )
+            Text(
+                text     = unit,
+                fontSize = 10.sp,
+                color    = EzTxtSecondary,
+                modifier = Modifier.padding(bottom = 3.dp, start = 2.dp)
+            )
+        }
+        if (showBar) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color.White.copy(0.08f))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(barFrac.coerceIn(0f, 1f))
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(
+                            Brush.horizontalGradient(listOf(EzAccentCyan, EzAccentEmerald))
+                        )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun EzTripRow(dot: Color, label: String, km: String, kwh: String, isLive: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.size(6.dp).clip(CircleShape).background(dot))
+            Text(label, fontSize = 12.sp, color = EzTxtSecondary)
+            Text(km,    fontSize = 12.sp, color = EzTxtPrimary,   fontWeight = FontWeight.SemiBold)
+            Text(kwh,   fontSize = 11.sp, color = EzTxtMuted)
+        }
+        if (isLive) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(EzAccentCoral.copy(0.18f))
+                    .border(0.5.dp, EzAccentCoral.copy(0.5f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Text("End trip", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzAccentCoral)
+            }
+        } else {
+            Text("17.4 kWh/100km", fontSize = 9.sp, color = EzTxtMuted)
+        }
+    }
+}
+
+@Composable
+fun EzMapPill(label: String, isOn: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (isOn) EzAccentCyan.copy(0.2f) else EzCardBg)
+            .border(0.5.dp, if (isOn) EzAccentCyan.copy(0.6f) else EzBorderSubtle, RoundedCornerShape(8.dp))
+            .clickable(remember { MutableInteractionSource() }, null) { onClick() }
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text       = label,
+            fontSize   = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color      = if (isOn) EzAccentCyan else EzTxtSecondary
+        )
+    }
+}
+
+@Composable
+fun EzMapIconBtn(icon: ImageVector, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(EzCardBg)
+            .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(9.dp))
+            .clickable(remember { MutableInteractionSource() }, null) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = null, tint = EzTxtSecondary, modifier = Modifier.size(16.dp))
+    }
+}
+
+@Composable
+fun EzCabinChip(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(EzCardBg)
+            .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(10.dp))
+            .clickable(remember { MutableInteractionSource() }, null) { onClick() }
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(Icons.Default.AcUnit, contentDescription = null, tint = EzAccentCyan, modifier = Modifier.size(14.dp))
+        Text("Cabin", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = EzTxtPrimary)
     }
 }
