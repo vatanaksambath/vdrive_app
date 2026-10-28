@@ -190,19 +190,19 @@ fun CambodiaOfflineMapView(
         }
     }
 
-    // Update Destination Flag / Pin Marker
-    LaunchedEffect(navigationState.destination, navigationState.isNavigating, symbolManagerInstance) {
+    // Update Destination Flag / Pin Marker (Shows dropped pin on tapped place preview OR active navigation destination)
+    val targetPinPlace = if (navigationState.isNavigating) navigationState.destination else selectedPlace
+    LaunchedEffect(targetPinPlace, symbolManagerInstance) {
         val sm = symbolManagerInstance ?: return@LaunchedEffect
-        val dest = navigationState.destination
         destinationSymbolInstance?.let { runCatching { sm.delete(it) } }
         destinationSymbolInstance = null
 
-        if (dest != null && navigationState.isNavigating) {
+        if (targetPinPlace != null) {
             val destOptions = SymbolOptions()
-                .withLatLng(LatLng(dest.latitude, dest.longitude))
+                .withLatLng(LatLng(targetPinPlace.latitude, targetPinPlace.longitude))
                 .withIconImage(DESTINATION_ICON_ID)
                 .withIconSize(1.3f)
-                .withTextField(dest.nameKm)
+                .withTextField(targetPinPlace.nameKm)
                 .withTextSize(12f)
                 .withTextOffset(arrayOf(0f, 2.0f))
                 .withTextColor("#FF5252")
@@ -281,17 +281,17 @@ fun CambodiaOfflineMapView(
                             }
                             symbolManagerInstance = symbolManager
 
-                            // Register Map Click to allow routing to any tapped location
+                            // Register Map Click to allow selecting & confirming any tapped location
                             map.addOnMapClickListener { latLng ->
                                 val tappedPlace = PlaceEntity(
-                                    nameKm = "ទីតាំងជ្រើសរើស (Custom Destination)",
-                                    nameEn = "Custom Destination",
-                                    category = PlaceCategory.SAVED_WORK,
+                                    nameKm = "ទីតាំងបានជ្រើសរើស (Dropped Pin)",
+                                    nameEn = "Dropped Pin",
+                                    category = PlaceCategory.LANDMARK,
                                     latitude = latLng.latitude,
                                     longitude = latLng.longitude,
-                                    addressKm = String.format("%.4f°N, %.4f°E", latLng.latitude, latLng.longitude),
-                                    addressEn = String.format("%.4f°N, %.4f°E", latLng.latitude, latLng.longitude),
-                                    city = "Cambodia"
+                                    addressKm = String.format(java.util.Locale.US, "%.4f°N, %.4f°E", latLng.latitude, latLng.longitude),
+                                    addressEn = String.format(java.util.Locale.US, "%.4f°N, %.4f°E", latLng.latitude, latLng.longitude),
+                                    city = "Phnom Penh"
                                 )
                                 onPlaceSelected?.invoke(tappedPlace)
                                 true
@@ -326,7 +326,18 @@ fun CambodiaOfflineMapView(
                             registerMapIcons(context, style)
                             vehicleSymbolInstance = null
                             destinationSymbolInstance = null
-                            symbolManagerInstance = SymbolManager(mapView, map, style)
+                            val symbolManager = SymbolManager(mapView, map, style).apply {
+                                iconAllowOverlap = true
+                                textAllowOverlap = false
+                                addClickListener(OnSymbolClickListener { symbol ->
+                                    val place = placesMap[symbol.id.toString()]
+                                    if (place != null) {
+                                        onPlaceSelected?.invoke(place)
+                                        true
+                                    } else false
+                                })
+                            }
+                            symbolManagerInstance = symbolManager
                             updateRouteOnMap(style, navigationState.routePolyline)
                         }
                     }
@@ -383,29 +394,41 @@ private fun updateRouteOnMap(style: Style, routePoints: List<Pair<Double, Double
             source = GeoJsonSource(ROUTE_SOURCE_ID, featureCollection)
             style.addSource(source)
 
-            // Casing layer for high visibility contrast
+            // 1. Google Maps style deep navy outer casing for crisp contrast against any map style
             val casingLayer = LineLayer(ROUTE_LAYER_ID + "-casing", ROUTE_SOURCE_ID).apply {
                 setProperties(
-                    lineColor("#0B111E"),
-                    lineWidth(9.5f),
+                    lineColor("#0A2540"),
+                    lineWidth(11.5f),
+                    lineCap("round"),
+                    lineJoin("round"),
+                    lineOpacity(0.92f)
+                )
+            }
+            style.addLayer(casingLayer)
+
+            // 2. Primary Google Maps signature vibrant Electric Blue route line
+            val lineLayer = LineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID).apply {
+                setProperties(
+                    lineColor("#1A73E8"), // Google Maps Signature Blue
+                    lineWidth(7.5f),
+                    lineCap("round"),
+                    lineJoin("round"),
+                    lineOpacity(0.98f)
+                )
+            }
+            style.addLayer(lineLayer)
+
+            // 3. Center Highlight Core Stripe for illuminated 3D navigation ribbon appearance
+            val highlightLayer = LineLayer(ROUTE_LAYER_ID + "-highlight", ROUTE_SOURCE_ID).apply {
+                setProperties(
+                    lineColor("#80D8FF"), // Ice-blue center glow
+                    lineWidth(2.5f),
                     lineCap("round"),
                     lineJoin("round"),
                     lineOpacity(0.85f)
                 )
             }
-            style.addLayer(casingLayer)
-
-            // Primary route line
-            val lineLayer = LineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID).apply {
-                setProperties(
-                    lineColor("#00E5FF"), // Geely Cyan
-                    lineWidth(6.5f),
-                    lineCap("round"),
-                    lineJoin("round"),
-                    lineOpacity(0.95f)
-                )
-            }
-            style.addLayer(lineLayer)
+            style.addLayer(highlightLayer)
         } else {
             source.setGeoJson(featureCollection)
         }

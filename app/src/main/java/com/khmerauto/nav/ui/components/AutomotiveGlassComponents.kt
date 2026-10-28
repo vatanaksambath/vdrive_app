@@ -336,7 +336,8 @@ fun EzDualTempSelector(
             verticalAlignment = Alignment.CenterVertically
         ) {
             val baseTemp = (Math.round(currentTemp * 2.0) / 2.0).toFloat()
-            val offsets = listOf(-1.0f, -0.5f, 0.0f, 0.5f, 1.0f)
+            // 3 clear stepped offsets guarantee zero ugly character wrapping on car head units
+            val offsets = listOf(-0.5f, 0.0f, 0.5f)
 
             for (offset in offsets) {
                 val tempVal = baseTemp + offset
@@ -346,18 +347,20 @@ fun EzDualTempSelector(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
                             .background(
-                                if (isCenter) Color.White else Color.Transparent
+                                if (isCenter) Color.White else Color(0x221E1B35)
                             )
                             .clickable { onTempSelected(activeZone, tempVal) }
-                            .padding(horizontal = if (isCenter) 7.dp else 4.dp, vertical = 2.dp),
+                            .padding(horizontal = if (isCenter) 9.dp else 6.dp, vertical = 3.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = if (isCenter) String.format("%.1f°C", tempVal) else String.format("%.1f", tempVal),
-                            fontSize = if (isCenter) 13.sp else 10.sp,
-                            fontWeight = if (isCenter) FontWeight.Black else FontWeight.Normal,
+                            fontSize = if (isCenter) 13.sp else 11.sp,
+                            fontWeight = if (isCenter) FontWeight.Black else FontWeight.Medium,
                             fontFamily = FontFamily.Monospace,
-                            color = if (isCenter) Color(0xFF0D0B1A) else EzTxtSecondary
+                            color = if (isCenter) Color(0xFF0D0B1A) else EzTxtSecondary,
+                            softWrap = false,
+                            maxLines = 1
                         )
                     }
                 }
@@ -418,7 +421,7 @@ fun EzCarTopTpms(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         // Left Column (FL & RL)
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             TpmsPill(label = "FL", bar = flBar)
             TpmsPill(label = "RL", bar = rlBar)
         }
@@ -459,7 +462,7 @@ fun EzCarTopTpms(
         }
 
         // Right Column (FR & RR)
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             TpmsPill(label = "FR", bar = frBar)
             TpmsPill(label = "RR", bar = rrBar)
         }
@@ -468,18 +471,22 @@ fun EzCarTopTpms(
 
 @Composable
 private fun TpmsPill(label: String, bar: Float) {
-    Column {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text = String.format("%.1f bar", bar),
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             color = if (bar in 2.2f..2.9f) EzTxtPrimary else EzAccentCoral,
-            fontFamily = FontFamily.Monospace
+            fontFamily = FontFamily.Monospace,
+            softWrap = false,
+            maxLines = 1
         )
         Text(
             text = label,
-            fontSize = 9.sp,
-            color = EzTxtMuted
+            fontSize = 8.sp,
+            color = EzTxtMuted,
+            softWrap = false,
+            maxLines = 1
         )
     }
 }

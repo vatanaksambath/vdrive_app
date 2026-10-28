@@ -14,6 +14,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -62,6 +63,8 @@ import com.khmerauto.nav.map.CambodiaOfflineMapView
 import com.khmerauto.nav.map.routing.ActiveNavigationState
 import com.khmerauto.nav.map.routing.ManeuverType
 import com.khmerauto.nav.map.routing.NavigationRouteEngine
+import com.khmerauto.nav.map.routing.calculateHaversineDistanceKm
+import kotlin.math.roundToInt
 import com.khmerauto.nav.map.search.OfflinePlaceSearchRepository
 import com.khmerauto.nav.telemetry.GapReconciliationEngine
 import com.khmerauto.nav.telemetry.GapReconciliationSummary
@@ -225,12 +228,21 @@ fun CockpitScreen(
                                     onClose    = { activeOverlay = CockpitOverlay.NONE }
                                 )
                             }
-                            else -> {
+                            CockpitOverlay.CABIN -> {
                                 EzCabinSuite(
                                     currentHal = currentHal,
                                     telemetry  = telemetry,
                                     strings    = strings,
                                     onClose    = { /* Stay in cockpit view */ },
+                                    modifier   = Modifier.fillMaxSize()
+                                )
+                            }
+                            else -> {
+                                EzHomeScreen(
+                                    currentHal = currentHal,
+                                    telemetry  = telemetry,
+                                    strings    = strings,
+                                    onNavigateToCabin = { activeOverlay = CockpitOverlay.CABIN },
                                     modifier   = Modifier.fillMaxSize()
                                 )
                             }
@@ -269,18 +281,11 @@ fun CockpitScreen(
                         onToggleFullMap         = { isFullMap = !isFullMap },
                         onPlaceSelected         = { place ->
                             selectedPlace = place
-                            coroutineScope.launch {
-                                routeEngine?.startNavigation(
-                                    destination           = place,
-                                    currentBatteryPercent = telemetry.batteryPercent,
-                                    startLat              = telemetry.latitude,
-                                    startLng              = telemetry.longitude
-                                )
-                                navController?.navigateTo(place)
-                            }
                         },
                         onQuickDestinationClick = { place ->
                             selectedPlace = place
+                        },
+                        onConfirmNavigation     = { place ->
                             coroutineScope.launch {
                                 routeEngine?.startNavigation(
                                     destination           = place,
@@ -290,6 +295,10 @@ fun CockpitScreen(
                                 )
                                 navController?.navigateTo(place)
                             }
+                            selectedPlace = null
+                        },
+                        onCancelSelection       = {
+                            selectedPlace = null
                         },
                         onOpenVoice             = { activeOverlay = CockpitOverlay.VOICE },
                         onRecenter              = { recenterTrigger++ },
@@ -419,6 +428,8 @@ fun EzMapPanelCard(
     onToggleFullMap: () -> Unit,
     onPlaceSelected: (PlaceEntity) -> Unit,
     onQuickDestinationClick: (PlaceEntity) -> Unit,
+    onConfirmNavigation: (PlaceEntity) -> Unit,
+    onCancelSelection: () -> Unit,
     onOpenVoice: () -> Unit,
     onRecenter: () -> Unit,
     onZoomIn: () -> Unit,
@@ -530,16 +541,21 @@ fun EzMapPanelCard(
                     Column(modifier = Modifier.weight(1f)) {
                         val dist = navState.currentManeuver?.distanceMeters ?: 0
                         val distStr = if (dist >= 1000) String.format("%.1f km", dist / 1000f) else "$dist m"
+                        val instruction = navState.currentManeuver?.instructionKm ?: "បន្តដំណើរទៅមុខ"
                         Text(
-                            text = "$distStr • ${navState.currentManeuver?.roadNameKm ?: navState.destination?.nameKm ?: "កំពុងធ្វើដំណើរ"}",
+                            text = "$distStr • $instruction",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = "${String.format("%.1f", navState.remainingDistanceKm)} km  •  ${navState.remainingMinutes} នាទី  •  ETA ${navState.etaString}  •  ${navState.estimatedArrivalBatteryPercent}% SoC",
                             fontSize = 11.sp,
-                            color = EzTxtSecondary
+                            color = EzTxtSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -695,11 +711,17 @@ fun EzMapPanelCard(
             }
         }
 
+        val bottomControlsPadding by animateDpAsState(
+            targetValue = if (selectedPlace != null) 220.dp else 14.dp,
+            animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+            label = "bottomControlsPadding"
+        )
+
         // ── 3. Bottom-Left Floating Voice Assistant FAB ─────────────────────
         Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 14.dp, bottom = 14.dp)
+                .padding(start = 14.dp, bottom = bottomControlsPadding)
                 .size(48.dp)
                 .ezGlow(EzAccentPurple, 8.dp)
                 .clip(CircleShape)
@@ -725,7 +747,7 @@ fun EzMapPanelCard(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 14.dp, bottom = 14.dp),
+                .padding(end = 14.dp, bottom = bottomControlsPadding),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -740,6 +762,35 @@ fun EzMapPanelCard(
             EzMapIconBtn(icon = Icons.Default.Add, onClick = onZoomIn)
             // Zoom Out
             EzMapIconBtn(icon = Icons.Default.Remove, onClick = onZoomOut)
+        }
+
+        // ── 5. Google Maps Style Place Confirmation Card ────────────────────
+        AnimatedVisibility(
+            visible = selectedPlace != null,
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing)
+            ) + fadeIn(animationSpec = tween(durationMillis = 300)),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing)
+            ) + fadeOut(animationSpec = tween(durationMillis = 250)),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            selectedPlace?.let { place ->
+                EzPlaceConfirmationCard(
+                    place          = place,
+                    vehicleLat     = telemetry.latitude,
+                    vehicleLng     = telemetry.longitude,
+                    vehicleBattery = telemetry.batteryPercent,
+                    isNavigating   = navState.isNavigating,
+                    onConfirm      = { onConfirmNavigation(place) },
+                    onDismiss      = onCancelSelection
+                )
+            }
         }
     }
 }
@@ -774,6 +825,329 @@ fun EzMapShortcutChip(
                 overflow = TextOverflow.Ellipsis
             )
         }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Google Maps Style Place Confirmation Card (Appears before starting navigation)
+// ═══════════════════════════════════════════════════════════════════════════
+@Composable
+fun EzPlaceConfirmationCard(
+    place: PlaceEntity,
+    vehicleLat: Double,
+    vehicleLng: Double,
+    vehicleBattery: Int,
+    isNavigating: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val distKm = remember(vehicleLat, vehicleLng, place.latitude, place.longitude) {
+        calculateHaversineDistanceKm(vehicleLat, vehicleLng, place.latitude, place.longitude)
+    }
+    val distStr = remember(distKm) {
+        if (distKm >= 1.0f) {
+            String.format(java.util.Locale.US, "%.1f km", distKm)
+        } else {
+            "${(distKm * 1000).toInt()} m"
+        }
+    }
+    val estMinutes = remember(distKm) {
+        maxOf(2, (distKm / 28.0f * 60).roundToInt())
+    }
+    val socDrain = remember(distKm) {
+        (distKm * 0.22f).roundToInt().coerceAtLeast(1)
+    }
+    val estArrivalSoc = remember(vehicleBattery, socDrain) {
+        (vehicleBattery - socDrain).coerceIn(0, 100)
+    }
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = Color(0xF5100E22),
+        border = BorderStroke(1.dp, Brush.linearGradient(listOf(EzAccentCyan.copy(0.7f), EzAccentPurple.copy(0.4f)))),
+        shadowElevation = 16.dp,
+        modifier = modifier
+            .fillMaxWidth()
+            .ezGlow(EzAccentCyan.copy(0.2f), 12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Drag handle accent indicator
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .width(36.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(0x44FFFFFF))
+            )
+
+            // Header: Category Icon + Place Name & Address + Close Button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Category Icon Badge
+                val (badgeColor, iconVector) = when (place.category) {
+                    PlaceCategory.SAVED_HOME -> EzAccentCyan to Icons.Default.Home
+                    PlaceCategory.SAVED_WORK -> EzAccentPurple to Icons.Default.Work
+                    PlaceCategory.EV_CHARGER -> Color(0xFF00E676) to Icons.Default.EvStation
+                    PlaceCategory.REPAIR_SHOP -> EzAccentCoral to Icons.Default.Build
+                    PlaceCategory.FAVORITE -> Color(0xFFFFD700) to Icons.Default.Star
+                    else -> Color(0xFFFF5252) to Icons.Default.Place
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(badgeColor.copy(alpha = 0.18f))
+                        .border(1.dp, badgeColor.copy(alpha = 0.6f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = iconVector,
+                        contentDescription = null,
+                        tint = badgeColor,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                // Place Names & Address
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = place.nameKm.ifBlank { place.nameEn },
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = place.nameEn,
+                        fontSize = 11.sp,
+                        color = Color(0xFFA0A5B5),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val fullAddress = listOfNotNull(
+                        place.addressKm.takeIf { it.isNotBlank() },
+                        place.city.takeIf { it.isNotBlank() }
+                    ).joinToString(" • ").ifBlank { "Cambodia" }
+                    Text(
+                        text = fullAddress,
+                        fontSize = 11.sp,
+                        color = EzTxtMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // Close Button (Dismiss without navigating)
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x22FFFFFF))
+                        .border(0.5.dp, Color(0x33FFFFFF), CircleShape)
+                        .clickable { onDismiss() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = Color.White.copy(alpha = 0.85f),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            // Route & Trip Estimation Strip (Google Maps Style Metrics)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0x401A1830))
+                    .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Driving Time
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DirectionsCar,
+                        contentDescription = null,
+                        tint = Color(0xFF00E676),
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Text(
+                        text = "$estMinutes នាទី (~${estMinutes}m)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF00E676)
+                    )
+                }
+
+                // Distance
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.NearMe,
+                        contentDescription = null,
+                        tint = EzAccentCyan,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = distStr,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                }
+
+                // Battery SoC Arrival
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.BatteryChargingFull,
+                        contentDescription = null,
+                        tint = EzAccentCyan,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "$estArrivalSoc% SoC",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = EzAccentCyan
+                    )
+                }
+            }
+
+            // EV Station Badges (if EV Charger)
+            if (place.isEvCharger) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    EzMiniBadge(
+                        text = "⚡ ${place.maxPowerKw} kW DC",
+                        color = Color(0xFF00E676)
+                    )
+                    EzMiniBadge(
+                        text = "🟢 ${place.availablePlugs}/${place.totalPlugs} ទំនេរ",
+                        color = EzAccentCyan
+                    )
+                    if (place.pricePerKwhKhr > 0) {
+                        EzMiniBadge(
+                            text = "៛ ${place.pricePerKwhKhr}/kWh",
+                            color = Color(0xFFFFD54F)
+                        )
+                    }
+                }
+            }
+
+            // Action Buttons: Cancel vs Start Navigation
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Cancel Button
+                OutlinedButton(
+                    onClick = onDismiss,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(0.8.dp, Color(0x40FFFFFF)),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = Color(0x18FFFFFF),
+                        contentColor = Color(0xFFC0C5D0)
+                    ),
+                    modifier = Modifier
+                        .weight(0.36f)
+                        .height(44.dp)
+                ) {
+                    Text(
+                        text = "បោះបង់ / Cancel",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1
+                    )
+                }
+
+                // Start Navigation Button (Google Maps Style Primary CTA)
+                Button(
+                    onClick = onConfirm,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.Transparent
+                    ),
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier
+                        .weight(0.64f)
+                        .height(44.dp)
+                        .ezGlow(Color(0xFF00B0FF), 10.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(Color(0xFF1976D2), Color(0xFF00B0FF))
+                            )
+                        )
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Navigation,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = if (isNavigating) "ប្តូរគោលដៅ / Reroute" else "ចាប់ផ្តើម / Start Navigation",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EzMiniBadge(text: String, color: Color) {
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = color.copy(alpha = 0.15f),
+        border = BorderStroke(0.5.dp, color.copy(alpha = 0.5f))
+    ) {
+        Text(
+            text = text,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = color,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            maxLines = 1
+        )
     }
 }
 
@@ -1212,6 +1586,347 @@ fun EzRightDashboard(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Driver Cockpit Home Suite (ទំព័រដើម • Home)
+// ═══════════════════════════════════════════════════════════════════════════
+@Composable
+fun EzHomeScreen(
+    currentHal: VehicleHalContract,
+    telemetry: VehicleTelemetryState,
+    strings: com.khmerauto.nav.core.i18n.AppStrings,
+    onNavigateToCabin: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val coroutineScope = rememberCoroutineScope()
+    val hvac = telemetry.hvacState
+    var activeTempZone by remember { mutableStateOf(Zone.DRIVER) }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .fillMaxHeight()
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        // ── 1. Top Vehicle Overview Card (Photo + Drive Modes) ───────────────
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(EzCardBg)
+                .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(14.dp))
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Top Telemetry Header Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // AEB & Gear Status
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF1E1B35))
+                                .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Icon(Icons.Default.PowerSettingsNew, contentDescription = null, tint = EzAccentCyan, modifier = Modifier.size(10.dp))
+                                Text("AEB", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
+                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(EzAccentEmerald.copy(0.18f))
+                                .border(0.5.dp, EzAccentEmerald.copy(0.5f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(telemetry.gear.name, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzAccentEmerald)
+                        }
+                    }
+
+                    // Compact Telemetry Metrics
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("⚡", fontSize = 9.sp)
+                            Text("${telemetry.evRangeKm}km", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzAccentCyan)
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("⛽", fontSize = 9.sp)
+                            Text("${telemetry.fuelRangeKm}km", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzAccentAmber)
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("🔋", fontSize = 9.sp)
+                            Text("${telemetry.batteryPercent}%", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
+                        }
+                        Text("${telemetry.odometerKm.toLong()}km", fontSize = 9.sp, color = EzTxtMuted)
+                    }
+                }
+
+                // Real 2026 Geely Galaxy M7 Full Photo
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(115.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF070611))
+                        .border(0.5.dp, EzBorderSubtle.copy(0.4f), RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.geely_galaxy_m7),
+                        contentDescription = "Geely Galaxy M7",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.horizontalGradient(
+                                    0.0f to Color(0xFF070611),
+                                    0.10f to Color.Transparent,
+                                    0.90f to Color.Transparent,
+                                    1.0f to Color(0xFF070611)
+                                )
+                            )
+                    )
+                }
+
+                // 2026 Geely Thor EM-P Drive Modes
+                val geelyModes = listOf(
+                    GeelyDriveMode.PURE_EV to "PURE EV",
+                    GeelyDriveMode.SMART to "SMART",
+                    GeelyDriveMode.POWER to "POWER",
+                    GeelyDriveMode.RANGE_EXT to "RANGE EXT"
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    geelyModes.forEach { (mode, label) ->
+                        val isSelected = telemetry.driveMode == mode
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(7.dp))
+                                .background(if (isSelected) EzAccentCyan.copy(0.25f) else Color(0xFF1E1B35))
+                                .border(
+                                    0.5.dp,
+                                    if (isSelected) EzAccentCyan else EzBorderSubtle,
+                                    RoundedCornerShape(7.dp)
+                                )
+                                .clickable {
+                                    coroutineScope.launch { currentHal.setDriveMode(mode) }
+                                }
+                                .padding(vertical = 7.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) EzAccentCyan else EzTxtSecondary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 2. Quick Vehicle Functions & Driving Energy Status ───────────────
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(EzCardBg)
+                .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(14.dp))
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "មុខងាររហ័ស & ថាមពល (Quick Controls & Energy)",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EzTxtPrimary
+                    )
+                    Text(
+                        text = "THOR EM-P",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EzAccentCyan,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+
+                // 4 Quick Automotive Action Chips
+                var isMirrorsFolded by remember { mutableStateOf(false) }
+                var isAmbientLightOn by remember { mutableStateOf(true) }
+                var isAutoHeadlamps by remember { mutableStateOf(true) }
+                var isChildLockOn by remember { mutableStateOf(true) }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    EzQuickFeatureToggle(
+                        icon = Icons.Default.FlipCameraAndroid,
+                        label = "បត់កញ្ចក់",
+                        subLabel = "Mirrors",
+                        isActive = isMirrorsFolded,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        isMirrorsFolded = !isMirrorsFolded
+                    }
+                    EzQuickFeatureToggle(
+                        icon = Icons.Default.Lightbulb,
+                        label = "ភ្លើងបំភ្លឺ",
+                        subLabel = "Ambient",
+                        isActive = isAmbientLightOn,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        isAmbientLightOn = !isAmbientLightOn
+                    }
+                    EzQuickFeatureToggle(
+                        icon = Icons.Default.Highlight,
+                        label = "ចង្កៀងមុខ",
+                        subLabel = "Headlamps",
+                        isActive = isAutoHeadlamps,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        isAutoHeadlamps = !isAutoHeadlamps
+                    }
+                    EzQuickFeatureToggle(
+                        icon = Icons.Default.ChildCare,
+                        label = "សោកុមារ",
+                        subLabel = "Child Lock",
+                        isActive = isChildLockOn,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        isChildLockOn = !isChildLockOn
+                    }
+                }
+
+                // Powertrain & Hybrid Efficiency Metrics
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF141226))
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("⚡", fontSize = 11.sp)
+                        Column {
+                            Text("ម៉ូទ័រ / Motor Power", fontSize = 8.sp, color = EzTxtMuted)
+                            Text("${if (telemetry.speedKmh > 0) (telemetry.speedKmh * 0.45f).toInt() else 0} kW", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzAccentCyan)
+                        }
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("🔋", fontSize = 11.sp)
+                        Column {
+                            Text("កម្រិតប្រើប្រាស់ / Avg", fontSize = 8.sp, color = EzTxtMuted)
+                            Text("15.6 kWh/100km", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzAccentEmerald)
+                        }
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("🔄", fontSize = 11.sp)
+                        Column {
+                            Text("Regen / ចាប់ហ្វ្រាំង", fontSize = 8.sp, color = EzTxtMuted)
+                            Text("High (ខ្លាំង)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EzAccentAmber)
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 3. Primary Climate Quick Access Card ──────────────────────────────
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(EzCardBg)
+                .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(14.dp))
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("ម៉ាស៊ីនត្រជាក់ (HVAC)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(if (hvac.isPowerOn) EzAccentCyan.copy(0.2f) else Color(0xFF1E1B35))
+                                .border(0.5.dp, if (hvac.isPowerOn) EzAccentCyan else EzBorderSubtle, CircleShape)
+                                .clickable { coroutineScope.launch { currentHal.setHvacPower(!hvac.isPowerOn) } }
+                                .padding(3.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.PowerSettingsNew,
+                                contentDescription = "HVAC Power",
+                                tint = if (hvac.isPowerOn) EzAccentCyan else EzTxtMuted,
+                                modifier = Modifier.size(10.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = "កាប៊ីនពេញលេញ >",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EzAccentCyan,
+                        modifier = Modifier.clickable { onNavigateToCabin() }
+                    )
+                }
+
+                // Dual zone stepped temperature selector
+                EzDualTempSelector(
+                    activeZone = activeTempZone,
+                    onZoneChange = { activeTempZone = it },
+                    driverTempC = hvac.driverTempC,
+                    passengerTempC = hvac.passengerTempC,
+                    onTempSelected = { zone, temp ->
+                        coroutineScope.launch { currentHal.setTemperature(zone, temp) }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Cabin Control Suite (Matching EZNav screenshot pixel-for-pixel)
 // ═══════════════════════════════════════════════════════════════════════════
 @Composable
@@ -1234,7 +1949,8 @@ fun EzCabinSuite(
         modifier = modifier
             .fillMaxWidth()
             .fillMaxHeight()
-            .verticalScroll(rememberScrollState()),
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         // ── 1. Top Vehicle Overview Card ─────────────────────────────────────
@@ -1935,13 +2651,12 @@ fun EzVoiceModal(
 
     Box(
         modifier = modifier
-            .fillMaxWidth(0.92f)
-            .fillMaxHeight(0.88f)
+            .fillMaxSize()
             .ezGlow(EzAccentPurple, 16.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(EzCardBg)
             .border(1.dp, EzAccentPurple.copy(0.4f), RoundedCornerShape(20.dp))
-            .padding(16.dp)
+            .padding(14.dp)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // ── Modal Header ───────────────────────────────────────────────
@@ -1950,37 +2665,37 @@ fun EzVoiceModal(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(34.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF1E1B35))
                             .clickable { onClose() },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Close", tint = EzTxtPrimary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Close", tint = EzTxtPrimary, modifier = Modifier.size(17.dp))
                     }
 
                     Column {
                         Text(
                             text = "ជ្រើសរើសពាក្យបញ្ជា",
-                            fontSize = 17.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Black,
                             color = EzTxtPrimary
                         )
                         Text(
                             text = "CHOOSE A COMMAND",
-                            fontSize = 10.sp,
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = EzTxtMuted,
-                            letterSpacing = 1.sp
+                            letterSpacing = 0.8.sp
                         )
                     }
                 }
 
                 // Glowing Voice Orb + status
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     lastFeedbackMessage?.let { msg ->
                         Text(
                             text = msg,
@@ -1992,40 +2707,41 @@ fun EzVoiceModal(
                     }
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(34.dp)
                             .clip(CircleShape)
                             .background(
                                 Brush.radialGradient(listOf(EzAccentPurple.copy(0.7f), Color.Transparent))
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Mic, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Mic, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
                     }
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
-            // ── Body: Category Sidebar (Left) + 2-Column Command Grid (Right) ─
+            // ── Body: Category Sidebar (Left) + Adaptive Command Grid (Right) ─
             Row(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Left Categories Column
+                // Left Categories Column (Smoothly scrollable, compact width)
                 Column(
                     modifier = Modifier
-                        .width(170.dp)
-                        .fillMaxHeight(),
+                        .width(125.dp)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     val categories = listOf(
                         Pair(VoiceCategory.CLIMATE,        "អាកាសធាតុ\nCLIMATE"),
                         Pair(VoiceCategory.WINDOWS,        "បង្អួច\nWINDOWS"),
-                        Pair(VoiceCategory.DOORS_TAILGATE, "ទ្វារ & គូទក្រោយ\nDOORS & TAILGATE"),
+                        Pair(VoiceCategory.DOORS_TAILGATE, "ទ្វារ & គូទ\nDOORS & TRUNK"),
                         Pair(VoiceCategory.SEATS_LIGHT,    "កៅអី & ភ្លើង\nSEATS & LIGHT"),
-                        Pair(VoiceCategory.MEDIA,          "ប្រព័ន្ធកម្សាន្ត\nMEDIA"),
+                        Pair(VoiceCategory.MEDIA,          "កម្សាន្ត\nMEDIA"),
                         Pair(VoiceCategory.NAVIGATION,     "ការនាំផ្លូវ\nNAVIGATION"),
                         Pair(VoiceCategory.SCENES,         "ឈុតឆ្លាតវៃ\nSCENES")
                     )
@@ -2035,33 +2751,33 @@ fun EzVoiceModal(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(9.dp))
                                 .background(if (isSelected) Color.White else Color(0xFF1E1B35))
-                                .border(0.5.dp, if (isSelected) Color.White else EzBorderSubtle, RoundedCornerShape(10.dp))
+                                .border(0.5.dp, if (isSelected) Color.White else EzBorderSubtle, RoundedCornerShape(9.dp))
                                 .clickable { selectedCategory = cat }
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .padding(horizontal = 10.dp, vertical = 7.dp)
                         ) {
                             Text(
                                 text = title,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isSelected) Color(0xFF0D0B1A) else EzTxtSecondary,
-                                lineHeight = 14.sp
+                                lineHeight = 13.sp
                             )
                         }
                     }
                 }
 
-                // Right 2-Column Command Cards Grid
+                // Right Command Cards Grid (Adaptive width to prevent truncation)
                 val commandsForCat = remember(selectedCategory) {
                     VoiceCommandCatalog.allCommands.filter { it.category == selectedCategory }
                 }
 
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
+                    columns = GridCells.Adaptive(minSize = 160.dp),
                     modifier = Modifier.weight(1f).fillMaxHeight(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(commandsForCat) { cmd ->
                         EzVoiceCommandCard(
@@ -2101,11 +2817,11 @@ fun EzVoiceCommandCard(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF1A1730))
-            .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(12.dp))
+            .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(10.dp))
             .clickable(remember { MutableInteractionSource() }, null) { onExecute() }
-            .padding(12.dp)
+            .padding(10.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2115,7 +2831,7 @@ fun EzVoiceCommandCard(
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = command.titleKm,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = EzTxtPrimary,
                     maxLines = 1,
@@ -2123,14 +2839,14 @@ fun EzVoiceCommandCard(
                 )
                 Text(
                     text = command.titleEn,
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     color = EzAccentCyan,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 if (command.acceptedPhrasesKm.isNotEmpty()) {
                     Text(
-                        text = "« ${command.acceptedPhrasesKm.take(2).joinToString(" • ")} »",
+                        text = "« ${command.acceptedPhrasesKm.first()} »",
                         fontSize = 9.sp,
                         color = EzTxtMuted,
                         maxLines = 1,
@@ -2143,7 +2859,7 @@ fun EzVoiceCommandCard(
                 imageVector = Icons.Default.KeyboardArrowRight,
                 contentDescription = null,
                 tint = EzTxtSecondary,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(15.dp)
             )
         }
     }
@@ -2165,64 +2881,91 @@ fun EzSpendingModal(
 
     Box(
         modifier = modifier
-            .fillMaxWidth(0.92f)
-            .fillMaxHeight(0.88f)
+            .fillMaxSize()
             .ezGlow(EzAccentCyan, 16.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(EzCardBg)
             .border(1.dp, EzAccentCyan.copy(0.4f), RoundedCornerShape(20.dp))
-            .padding(16.dp)
+            .padding(14.dp)
     ) {
-        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.weight(1f, fill = false),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(34.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF1E1B35))
                             .clickable { onClose() },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Close", tint = EzTxtPrimary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Close", tint = EzTxtPrimary, modifier = Modifier.size(17.dp))
                     }
                     Text(
                         text = "ចំណាយ និងការថែទាំ • Spending & Service",
-                        fontSize = 16.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Black,
-                        color = EzTxtPrimary
+                        color = EzTxtPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-                Text(
-                    text = "ODO: ${telemetry.odometerKm.toLong()} km",
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = EzAccentCyan
-                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF1E1B35))
+                        .border(0.5.dp, EzAccentCyan.copy(0.4f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "ODO: ${telemetry.odometerKm.toLong()} km",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = EzAccentCyan,
+                        softWrap = false,
+                        maxLines = 1
+                    )
+                }
             }
 
-            // Tab Buttons
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("ចំណាយ / Spending", "ការថែទាំ / Maintenance", "យានដ្ឋាន EV / Workshops").forEachIndexed { idx, title ->
+            // Tab Buttons (Horizontal scroll to prevent letter wrapping)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf(
+                    "ចំណាយ • Spending",
+                    "ការថែទាំ • Service",
+                    "យានដ្ឋាន EV • Workshops"
+                ).forEachIndexed { idx, title ->
                     val isSelected = selectedTab == idx
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (isSelected) Color.White else Color(0xFF1E1B35))
+                            .border(0.5.dp, if (isSelected) Color.White else EzBorderSubtle, RoundedCornerShape(8.dp))
                             .clickable { selectedTab = idx }
-                            .padding(horizontal = 14.dp, vertical = 7.dp)
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Text(
                             text = title,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isSelected) Color(0xFF0D0B1A) else EzTxtSecondary
+                            color = if (isSelected) Color(0xFF0D0B1A) else EzTxtSecondary,
+                            softWrap = false,
+                            maxLines = 1
                         )
                     }
                 }
@@ -2233,17 +2976,31 @@ fun EzSpendingModal(
                 when (selectedTab) {
                     0 -> {
                         // Spending & Trip Efficiency
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 EzMetricCard(label = "THIS WEEK SPENT", value = "124,500", unit = "KHR", accent = EzAccentEmerald, modifier = Modifier.weight(1f))
                                 EzMetricCard(label = "ENERGY AVG", value = "21.0", unit = "kWh/100km", accent = EzAccentCyan, modifier = Modifier.weight(1f))
                                 EzMetricCard(label = "FUEL SAVED", value = "48.5", unit = "Litres", accent = EzAccentAmber, modifier = Modifier.weight(1f))
                             }
+                            Spacer(Modifier.height(2.dp))
+                            Text("Recent Charging & Fuel Activity", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
+                            EzMaintenanceRow("Canadia Tower DC 120kW Fast Charger", 15, 60)
+                            EzMaintenanceRow("Home Smart AC Charger (Thor 3.3kW)", 8, 30)
                         }
                     }
                     1 -> {
                         // Maintenance Countdowns
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             EzMaintenanceRow("Tire Rotation (បង្វិលសំបកកង់)", 8717, 10000)
                             EzMaintenanceRow("Brake Fluid Inspection (ប្រេងហ្វ្រាំង)", 14500, 20000)
                             EzMaintenanceRow("Battery Coolant Flush (ទឹកស្អំអាគុយ)", 28000, 40000)
@@ -2252,7 +3009,12 @@ fun EzSpendingModal(
                     }
                     else -> {
                         // Workshops
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             EzWorkshopCard("Geely Phnom Penh Official Service", "Russian Blvd, Phnom Penh", "023 888 999")
                             EzWorkshopCard("EV Cambodia Pro Tech Center", "St 2004, Phnom Penh", "012 345 678")
                         }
@@ -2271,18 +3033,18 @@ private fun EzMaintenanceRow(title: String, remainingKm: Int, totalKm: Int) {
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF1A1730))
             .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(10.dp))
-            .padding(12.dp)
+            .padding(10.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
-                Text(title, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("Service in $remainingKm km", fontSize = 10.sp, color = EzAccentCyan)
             }
-            Text("$remainingKm / $totalKm km", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = EzTxtSecondary)
+            Text("$remainingKm / $totalKm km", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = EzTxtSecondary, softWrap = false)
         }
     }
 }
@@ -2295,12 +3057,12 @@ private fun EzWorkshopCard(name: String, address: String, phone: String) {
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF1A1730))
             .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(10.dp))
-            .padding(12.dp)
+            .padding(10.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(name, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary)
-            Text(address, fontSize = 10.sp, color = EzTxtSecondary)
-            Text("Tel: $phone", fontSize = 10.sp, color = EzAccentCyan)
+            Text(name, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EzTxtPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(address, fontSize = 10.sp, color = EzTxtSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Tel: $phone", fontSize = 10.sp, color = EzAccentCyan, softWrap = false)
         }
     }
 }
@@ -2324,24 +3086,34 @@ fun EzMetricCard(
             .clip(RoundedCornerShape(12.dp))
             .background(EzCardBg)
             .border(0.5.dp, EzBorderSubtle, RoundedCornerShape(12.dp))
-            .padding(horizontal = 10.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        Text(label, fontSize = 8.sp, color = EzTxtMuted, letterSpacing = 0.8.sp)
+        Text(label, fontSize = 8.sp, color = EzTxtMuted, letterSpacing = 0.6.sp, maxLines = 1, softWrap = false)
         Row(verticalAlignment = Alignment.Bottom) {
+            val valFontSize = when {
+                value.length > 7 -> 15.sp
+                value.length > 5 -> 17.sp
+                else             -> 22.sp
+            }
             Text(
                 text       = value,
-                fontSize   = 26.sp,
+                fontSize   = valFontSize,
                 fontWeight = FontWeight.Black,
                 color      = EzTxtPrimary,
                 fontFamily = FontFamily.Monospace,
-                letterSpacing = (-0.5).sp
+                letterSpacing = (-0.5).sp,
+                softWrap   = false,
+                maxLines   = 1,
+                overflow   = TextOverflow.Ellipsis
             )
             Text(
                 text     = unit,
-                fontSize = 10.sp,
+                fontSize = 9.sp,
                 color    = EzTxtSecondary,
-                modifier = Modifier.padding(bottom = 3.dp, start = 2.dp)
+                softWrap = false,
+                maxLines = 1,
+                modifier = Modifier.padding(bottom = 2.dp, start = 2.dp)
             )
         }
         if (showBar) {
