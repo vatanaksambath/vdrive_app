@@ -286,7 +286,7 @@ fun CambodiaOfflineMapView(
                                 val tappedPlace = PlaceEntity(
                                     nameKm = "ទីតាំងបានជ្រើសរើស (Dropped Pin)",
                                     nameEn = "Dropped Pin",
-                                    category = PlaceCategory.LANDMARK,
+                                    category = PlaceCategory.TOURISM_LANDMARK,
                                     latitude = latLng.latitude,
                                     longitude = latLng.longitude,
                                     addressKm = String.format(java.util.Locale.US, "%.4f°N, %.4f°E", latLng.latitude, latLng.longitude),
